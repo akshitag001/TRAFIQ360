@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Creating the gis_twin.py script which builds a NetworkX road graph for Bengaluru, handles closures, implements routing and k-shortest paths, models flow redirection and secondary congestion, and generates Folium maps.",
+  "updatedAt": "2026-06-16T02:31:29.861656400Z"
+}

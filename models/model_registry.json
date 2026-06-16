@@ -1,0 +1,26 @@
+{
+  "versions": [
+    {
+      "version": "v1.0",
+      "trained_at": "2026-06-16T00:00:00",
+      "original_samples": 8173,
+      "feedback_samples": 0,
+      "total_samples": 8173,
+      "impact_rmse": 0.5954,
+      "duration_rmse": 13140.6,
+      "closure_auc": 0.7564,
+      "is_active": false
+    },
+    {
+      "version": "v1.1",
+      "trained_at": "2026-06-16T13:43:21.443683",
+      "original_samples": 8173,
+      "feedback_samples": 1,
+      "total_samples": 8174,
+      "impact_rmse": 0.6083,
+      "duration_rmse": 17208.0844,
+      "closure_auc": 0.7798,
+      "is_active": true
+    }
+  ]
+}

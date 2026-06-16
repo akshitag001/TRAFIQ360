@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Creating a test script using the Flask test client to verify dashboard, prediction, routing, optimization, conflicts, and PDF generation.",
+  "updatedAt": "2026-06-16T02:33:40.509879800Z"
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Shield shape -->
+  <path d="M16 2 L28 7 L28 17 C28 23 22 28 16 30 C10 28 4 23 4 17 L4 7 Z" fill="#1e3a5f" stroke="#0f172a" stroke-width="1"/>
+  <!-- Inner shield highlight -->
+  <path d="M16 5 L25 9 L25 17 C25 21.5 20.5 25.5 16 27.5 C11.5 25.5 7 21.5 7 17 L7 9 Z" fill="#2563eb" opacity="0.3"/>
+  <!-- Star -->
+  <polygon points="16,9 17.2,13 21,13 18,15.5 19.2,19.5 16,17 12.8,19.5 14,15.5 11,13 14.8,13" fill="#f59e0b"/>
+  <!-- BTP text -->
+  <text x="16" y="26" text-anchor="middle" font-size="4.5" font-family="Arial" font-weight="700" fill="#ffffff" letter-spacing="0.5">BTP</text>
+</svg>

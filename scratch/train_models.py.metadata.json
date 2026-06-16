@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Creating the train_models.py script to preprocess data, train XGBoost, LightGBM, and Random Forest models, select the best model, output validation results, and save feature importances and SHAP plots.",
+  "updatedAt": "2026-06-16T02:31:12.298188100Z"
+}
