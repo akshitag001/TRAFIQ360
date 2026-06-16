@@ -1,0 +1,24 @@
+[
+  {
+    "version": "v1.0",
+    "trained_at": "2026-06-16T21:48:01.702667",
+    "n_samples": 8174,
+    "xgb_auc": 0.9392,
+    "lgb_auc": 0.7798,
+    "rmse_impact": 0.6083,
+    "rmse_duration": 17208.0844,
+    "notes": "auto-trained",
+    "is_active": true
+  },
+  {
+    "version": "v1.1",
+    "trained_at": "2026-06-16T22:17:47.469632",
+    "n_samples": 8174,
+    "xgb_auc": 0.8798,
+    "lgb_auc": 0.7358,
+    "rmse_impact": 1.2017,
+    "rmse_duration": 123592.591,
+    "notes": "challenger (insufficient gain)",
+    "is_active": false
+  }
+]

@@ -13,8 +13,8 @@ TRAFIQ360 is broken down into an intuitive 6-step operational workflow:
 ### 1. Executive Operations Dashboard & CCTV Intelligence
 A high-level telemetry view of the Bengaluru road corridor networks. 
 - **Digital Twin:** Displays active blockages, predicted congestion levels, and overall officer resource availability on a real-world map mapping exact OpenStreetMap (OSM) junction curves and road contours.
-- **Incident Roster:** Tracks all active incidents and their real-time impact status.
-- **CCTV Pipeline:** Live ingestion simulation of real Bengaluru traffic cameras (Silk Board, Hebbal Flyover, Mekhri Circle). Allows operators to verify congestion and extract text data directly into the planning pipeline.
+- **Incident Roster & Conflict Detection:** Tracks all active incidents. Employs a **Multi-Event Conflict Detection Engine** that automatically checks for resource exhaustion, corridor overlaps, and zone clashes between multiple simultaneous events, warning operators with color-coded alerts.
+- **CCTV Pipeline:** Live ingestion simulation of real Bengaluru traffic cameras (Silk Board, Hebbal Flyover, Mekhri Circle). Allows operators to verify congestion and extract text data directly into the planning pipeline via Gemini Vision.
 
 ### 2. Traffic Incident Forecast Planner
 Before a disruption happens, authorities log the incident parameters here.
@@ -46,7 +46,8 @@ Generates an operational timeline tracking pre-event staging (24h out), barricad
 A system is only as good as its ability to learn from reality.
 - **Operational Feedback:** Operators submit the *actual* impact, duration, and resource counts after an event concludes.
 - **Approval Queue:** Administrators review the submitted feedback through the Approval Queue tab.
-- **Dynamic Retraining:** Once approved, administrators can trigger a model retraining loop directly from the UI. The system appends the real-world feedback to the original training dataset and trains new XGBoost and LightGBM models, logging the decline in RMSE and tracking model versions.
+- **Dynamic Retraining:** Once approved, administrators can trigger a model retraining loop directly from the UI. The system appends the real-world feedback to the original training dataset and trains new XGBoost and LightGBM models, logging the decline in RMSE.
+- **Live Model Registry & Hot-Rollbacks:** The system tracks all trained ML versions (e.g., `v1.1`, `v1.2`) in a visual `Chart.js` line graph. Administrators can view performance telemetry and instantly **Rollback** to prior versions. The backend dynamically hot-reloads the selected `.pkl` weights into Flask memory without taking the server offline.
 
 ---
 
@@ -59,15 +60,16 @@ TRAFIQ360 relies on a hybrid ensemble of machine learning models trained on hist
 2. **Expected Duration (LightGBM Regressor):** Forecasts how long the congestion will last in minutes.
 3. **Road Closure Probability (Random Forest Classifier):** A binary classifier predicting the likelihood that physical barricading and road closures will be required.
 
-### The Retraining Feedback Loop
+### The Retraining Feedback Loop & Model Registry
 Instead of relying on static, decaying models, TRAFIQ360 features a Continuous Integration pipeline for data:
 1. When actual event metrics are submitted and approved, they are logged into `data/post_event_feedback.xlsx`.
 2. The Admin clicks **"⚡ Retrain Models"**.
 3. A background Python thread spins up `scratch/retrain_pipeline.py`.
 4. The pipeline merges the historical dataset with the newly acquired ground truth data.
-5. The models are re-fitted.
+5. The models are re-fitted and benchmarked against a fixed 20% hold-out validation set (`data/test_set.csv`).
 6. The system evaluates the new Mean Squared Error (MSE), Root Mean Squared Error (RMSE), and Area Under Curve (AUC).
-7. If the metrics improve, a new model version (e.g., `v1.1`) is compiled, saved, and hot-swapped into production without system downtime.
+7. **Auto-Promotion:** If the LightGBM closure AUC improves by `+0.005`, the new model is auto-promoted to `ACTIVE` (e.g. `v1.1`), otherwise it is saved as a `CHALLENGER`.
+8. The registry UI dynamically updates to reflect the new pipeline telemetry.
 
 ---
 

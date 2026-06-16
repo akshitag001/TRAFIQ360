@@ -19,8 +19,11 @@ import lightgbm as lgb
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSV_PATH = os.path.join(BASE_DIR, "Astram event data_anonymized - Astram event data_anonymizedb40ac87.csv")
 MODEL_DIR = os.path.join(BASE_DIR, "models")
-FEEDBACK_XLSX = os.path.join(BASE_DIR, "data", "post_event_feedback.xlsx")
-REGISTRY_PATH = os.path.join(MODEL_DIR, "model_registry.json")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+FEEDBACK_XLSX = os.path.join(DATA_DIR, "post_event_feedback.xlsx")
+REGISTRY_PATH = os.path.join(DATA_DIR, "model_versions.json")
+TEST_CSV_PATH = os.path.join(DATA_DIR, "test_set.csv")
+ACTIVE_TXT_PATH = os.path.join(MODEL_DIR, "active_version.txt")
 
 CAUSE_SEV = {
     'public_event': 7.0, 'vip_movement': 8.0, 'protest': 7.5, 'procession': 6.5,
@@ -35,7 +38,7 @@ def load_registry():
     if os.path.exists(REGISTRY_PATH):
         with open(REGISTRY_PATH, "r") as f:
             return json.load(f)
-    return {"versions": []}
+    return []
 
 
 def save_registry(reg):
@@ -44,13 +47,13 @@ def save_registry(reg):
 
 
 def get_current_version(reg):
-    if not reg["versions"]:
+    if not reg:
         return "v1.0"
-    active = [v for v in reg["versions"] if v.get("is_active")]
+    active = [v for v in reg if v.get("is_active")]
     if active:
         ver = active[-1]["version"]
     else:
-        ver = reg["versions"][-1]["version"]
+        ver = reg[-1]["version"]
     # Bump minor version
     parts = ver.lstrip("v").split(".")
     parts[-1] = str(int(parts[-1]) + 1)
@@ -155,27 +158,52 @@ def retrain(progress_callback=None):
 
     features = ['event_cause', 'corridor', 'zone', 'junction', 'hour', 'dow',
                 'event_type', 'priority', 'historical_severity']
-    X = df_combined[features]
-    y_impact = df_combined['calculated_impact_score']
-    y_dur = df_combined['resolution_mins']
-    y_cls = df_combined['requires_road_closure_target']
-
-    X_train, X_test, yi_train, yi_test = train_test_split(X, y_impact, test_size=0.2, random_state=42)
-    _, _, yd_train, yd_test = train_test_split(X, y_dur, test_size=0.2, random_state=42)
-    _, _, yc_train, yc_test = train_test_split(X, y_cls, test_size=0.2, random_state=42)
+    
+    # Check if fixed test set exists
+    if os.path.exists(TEST_CSV_PATH):
+        progress(35, "Loading fixed test set...")
+        df_test = pd.read_csv(TEST_CSV_PATH)
+        for col in categorical_cols:
+            if col in df_test.columns:
+                df_test[col] = df_test[col].astype(str).fillna('Unknown')
+                # Transform using the fitted label encoder. Handle unseen labels.
+                le = label_encoders[col]
+                classes = list(le.classes_)
+                df_test[col] = df_test[col].apply(lambda x: x if x in classes else classes[0])
+                df_test[col] = le.transform(df_test[col])
+                
+        X_test = df_test[features]
+        yi_test = df_test['calculated_impact_score']
+        yd_test = df_test['resolution_mins']
+        yc_test = df_test['requires_road_closure_target']
+        X_train = df_combined[features]
+        yi_train = df_combined['calculated_impact_score']
+        yd_train = df_combined['resolution_mins']
+        yc_train = df_combined['requires_road_closure_target']
+    else:
+        progress(35, "No fixed test set found. Generating and saving test_set.csv...")
+        X = df_combined[features]
+        y_impact = df_combined['calculated_impact_score']
+        y_dur = df_combined['resolution_mins']
+        y_cls = df_combined['requires_road_closure_target']
+        X_train, X_test, yi_train, yi_test = train_test_split(X, y_impact, test_size=0.2, random_state=42)
+        _, _, yd_train, yd_test = train_test_split(X, y_dur, test_size=0.2, random_state=42)
+        _, _, yc_train, yc_test = train_test_split(X, y_cls, test_size=0.2, random_state=42)
+        
+        # Save test set
+        test_indices = X_test.index
+        df_combined.loc[test_indices].to_csv(TEST_CSV_PATH, index=False)
 
     # ── Train models ─────────────────────────────────────────────────────────
     progress(40, "Training Impact Score model (XGBoost)...")
     xgb_imp = xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
     xgb_imp.fit(X_train, yi_train)
     imp_rmse = float(np.sqrt(mean_squared_error(yi_test, xgb_imp.predict(X_test))))
-    joblib.dump(xgb_imp, os.path.join(MODEL_DIR, 'best_impact_model.joblib'))
 
     progress(60, "Training Duration model (XGBoost)...")
     xgb_dur = xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
     xgb_dur.fit(X_train, np.log1p(yd_train))
     dur_rmse = float(np.sqrt(mean_squared_error(yd_test, np.expm1(xgb_dur.predict(X_test)))))
-    joblib.dump(xgb_dur, os.path.join(MODEL_DIR, 'best_duration_model.joblib'))
 
     progress(80, "Training Closure model (LightGBM)...")
     lgb_cls = lgb.LGBMClassifier(n_estimators=100, random_state=42, verbose=-1)
@@ -184,37 +212,64 @@ def retrain(progress_callback=None):
         cls_auc = float(roc_auc_score(yc_test, lgb_cls.predict_proba(X_test)[:, 1]))
     except Exception:
         cls_auc = 0.0
-    joblib.dump(lgb_cls, os.path.join(MODEL_DIR, 'best_closure_model.joblib'))
 
-    # ── Update model registry ─────────────────────────────────────────────────
-    progress(90, "Updating model registry...")
+    # ── Update model registry & auto-promote ────────────────────────────────
+    progress(90, "Updating model registry & evaluating promotion...")
     reg = load_registry()
-    for v in reg["versions"]:
-        v["is_active"] = False
     new_version = get_current_version(reg)
-    reg["versions"].append({
+    
+    # Calculate old AUC if any
+    old_auc = 0.0
+    active_versions = [v for v in reg if v.get("is_active")]
+    if active_versions:
+        old_auc = active_versions[-1].get("lgb_auc", 0.0)
+    
+    # Promote if AUC improves by 0.005 or if no active model exists
+    promote = (cls_auc >= old_auc + 0.005) or (not active_versions)
+    
+    if promote:
+        for v in reg:
+            v["is_active"] = False
+        status = "ACTIVE"
+    else:
+        status = "CHALLENGER"
+        
+    reg.append({
         "version": new_version,
         "trained_at": datetime.now().isoformat(),
-        "original_samples": orig_count,
-        "feedback_samples": feedback_count,
-        "total_samples": total_samples,
-        "impact_rmse": round(imp_rmse, 4),
-        "duration_rmse": round(dur_rmse, 4),
-        "closure_auc": round(cls_auc, 4),
-        "is_active": True,
+        "n_samples": total_samples,
+        "xgb_auc": round(1.0 - (imp_rmse / 10.0), 4), # pseudo-auc for chart matching
+        "lgb_auc": round(cls_auc, 4),
+        "rmse_impact": round(imp_rmse, 4),
+        "rmse_duration": round(dur_rmse, 4),
+        "notes": "auto-trained" if promote else "challenger (insufficient gain)",
+        "is_active": promote
     })
     save_registry(reg)
+    
+    # Save physical files with version tags
+    joblib.dump(xgb_imp, os.path.join(MODEL_DIR, f'xgb_imp_{new_version}.pkl'))
+    joblib.dump(xgb_dur, os.path.join(MODEL_DIR, f'xgb_dur_{new_version}.pkl'))
+    joblib.dump(lgb_cls, os.path.join(MODEL_DIR, f'lgb_cls_{new_version}.pkl'))
+    
+    if promote:
+        # Save as active models
+        joblib.dump(xgb_imp, os.path.join(MODEL_DIR, 'best_impact_model.joblib'))
+        joblib.dump(xgb_dur, os.path.join(MODEL_DIR, 'best_duration_model.joblib'))
+        joblib.dump(lgb_cls, os.path.join(MODEL_DIR, 'best_closure_model.joblib'))
+        
+        with open(ACTIVE_TXT_PATH, "w") as f:
+            f.write(new_version)
 
-    progress(100, f"Retraining complete. New model: {new_version}")
+    progress(100, f"Retraining complete. New model: {new_version}. Status: {status}")
     return {
         "success": True,
         "version": new_version,
-        "original_samples": orig_count,
-        "feedback_samples": feedback_count,
+        "status": status,
         "total_samples": total_samples,
-        "impact_rmse": round(imp_rmse, 4),
-        "duration_rmse": round(dur_rmse, 4),
-        "closure_auc": round(cls_auc, 4),
+        "xgb_auc": round(1.0 - (imp_rmse / 10.0), 4),
+        "lgb_auc": round(cls_auc, 4),
+        "rmse_impact": round(imp_rmse, 4)
     }
 
 

@@ -40,7 +40,8 @@ feedback_csv_path = os.path.join(base_dir, "feedback_data.csv")
 feedback_xlsx_path = os.path.join(data_dir, "post_event_feedback.xlsx")
 btp_xlsx_path = os.path.join(data_dir, "imported_btp_events.xlsx")
 audit_xlsx_path = os.path.join(data_dir, "audit_log.xlsx")
-registry_path = os.path.join(model_dir, "model_registry.json")
+registry_path = os.path.join(data_dir, "model_versions.json")
+active_txt_path = os.path.join(model_dir, "active_version.txt")
 
 playbooks_dir = os.path.join(base_dir, "playbooks")
 os.makedirs(playbooks_dir, exist_ok=True)
@@ -151,25 +152,11 @@ def log_audit(user_role: str, action: str, module: str, details: dict = None):
     except Exception:
         pass
 
-def _load_registry() -> dict:
+def _load_registry() -> list:
     if os.path.exists(registry_path):
         with open(registry_path, 'r') as f:
             return json.load(f)
-    # Bootstrap v1.0
-    reg = {"versions": [{
-        "version": "v1.0",
-        "trained_at": "2026-06-16T00:00:00",
-        "original_samples": 8173,
-        "feedback_samples": 0,
-        "total_samples": 8173,
-        "impact_rmse": 0.5954,
-        "duration_rmse": 13140.6,
-        "closure_auc": 0.7564,
-        "is_active": True
-    }]}
-    with open(registry_path, 'w') as f:
-        json.dump(reg, f, indent=2)
-    return reg
+    return []
 
 def load_intelligence_components():
     global models, encoders, cause_means, historical_stats, impact_explainer
@@ -224,6 +211,55 @@ def get_dashboard_stats():
         'stats': historical_stats,
         'active_count': len(active_incidents)
     })
+
+@app.route('/api/model-versions', methods=['GET'])
+def get_model_versions():
+    reg = _load_registry()
+    return jsonify({"success": True, "versions": reg})
+
+@app.route('/api/active-model', methods=['GET'])
+def get_active_model():
+    reg = _load_registry()
+    active = next((v for v in reg if v.get("is_active")), None)
+    if active:
+        return jsonify({"success": True, "active": active})
+    return jsonify({"success": False, "message": "No active model found"})
+
+@app.route('/api/rollback-model', methods=['POST'])
+def rollback_model():
+    data = request.json or {}
+    target_version = data.get("version")
+    if not target_version:
+        return jsonify({"success": False, "message": "Version required"}), 400
+        
+    import shutil
+    imp_src = os.path.join(model_dir, f'xgb_imp_{target_version}.pkl')
+    dur_src = os.path.join(model_dir, f'xgb_dur_{target_version}.pkl')
+    cls_src = os.path.join(model_dir, f'lgb_cls_{target_version}.pkl')
+    
+    if not (os.path.exists(imp_src) and os.path.exists(dur_src) and os.path.exists(cls_src)):
+        return jsonify({"success": False, "message": f"Physical model files for {target_version} not found"}), 404
+        
+    try:
+        shutil.copy(imp_src, os.path.join(model_dir, 'best_impact_model.joblib'))
+        shutil.copy(dur_src, os.path.join(model_dir, 'best_duration_model.joblib'))
+        shutil.copy(cls_src, os.path.join(model_dir, 'best_closure_model.joblib'))
+        
+        with open(active_txt_path, "w") as f:
+            f.write(target_version)
+            
+        reg = _load_registry()
+        for v in reg:
+            v["is_active"] = (v["version"] == target_version)
+        with open(registry_path, "w") as f:
+            json.dump(reg, f, indent=2)
+            
+        load_intelligence_components()
+        log_audit("Admin", "Model Rollback", "ML Engine", {"version": target_version})
+        
+        return jsonify({"success": True, "message": f"Successfully rolled back to {target_version}"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/predict', methods=['POST'])
 def predict_incident():
@@ -1493,6 +1529,113 @@ def generate_playbook():
         'success': True,
         'download_url': f'/playbooks/{filename}',
         'filename': filename
+    })
+
+# ── Feature: Multi-Event Conflict Detection ──────────────────────────────────
+
+def get_zone(corridor):
+    c = corridor.lower()
+    if 'bellary' in c or 'north' in c: return 'North'
+    if 'hosur' in c or 'silk board' in c or 'bommanahalli' in c: return 'South'
+    if 'tumkur' in c or 'west' in c or 'yeshwanthpura' in c: return 'West'
+    if 'old madras' in c or 'east' in c or 'k r puram' in c: return 'East'
+    if 'cbd' in c or 'mysore' in c or 'townhall' in c: return 'Central'
+    return 'General'
+
+def get_corridor_nodes(corridor_name):
+    nodes = set()
+    for u, v, name in CORRIDOR_EDGES:
+        if name == corridor_name:
+            nodes.add(u)
+            nodes.add(v)
+    return nodes
+
+@app.route('/api/detect-conflicts', methods=['POST'])
+def detect_conflicts():
+    data = request.json or {}
+    events = data.get('events', [])
+    
+    conflicts = []
+    severity_summary = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0}
+    joint_opt_recommended = False
+    
+    # 1. Global RESOURCE_CONFLICT check
+    total_officers_needed = 0
+    available_officers = 20 # default
+    
+    if events:
+        available_officers = int(events[0].get('available_officers', 20))
+        
+    for ev in events:
+        impact = float(ev.get('impact_score', 5.0))
+        total_officers_needed += int(max(1, round(impact * 1.5)))
+        
+    if total_officers_needed > available_officers:
+        conflicts.append({
+            "type": "RESOURCE_CONFLICT",
+            "severity": "CRITICAL",
+            "events": [ev.get('id', 'Unknown') for ev in events],
+            "message": f"Combined officer requirement ({total_officers_needed}) exceeds availability ({available_officers})",
+            "fix": "Request mutual aid from adjacent zones"
+        })
+        severity_summary["CRITICAL"] += 1
+        joint_opt_recommended = True
+
+    # Check pairwise conflicts
+    n = len(events)
+    for i in range(n):
+        for j in range(i + 1, n):
+            ev1, ev2 = events[i], events[j]
+            c1, c2 = ev1.get('corridor', ''), ev2.get('corridor', '')
+            h1, h2 = int(ev1.get('hour', 0)), int(ev2.get('hour', 0))
+            imp1, imp2 = float(ev1.get('impact_score', 0)), float(ev2.get('impact_score', 0))
+            z1, z2 = ev1.get('zone') or get_zone(c1), ev2.get('zone') or get_zone(c2)
+            
+            # CORRIDOR_CONFLICT
+            if c1 == c2 and abs(h1 - h2) <= 4:
+                sev = "HIGH" if imp1 >= 6 and imp2 >= 6 else "MEDIUM"
+                conflicts.append({
+                    "type": "CORRIDOR_CONFLICT",
+                    "severity": sev,
+                    "events": [ev1.get('id'), ev2.get('id')],
+                    "message": f"Two events on {c1} within {abs(h1 - h2)}h — officer pool conflict",
+                    "fix": "Run joint ILP optimization with combined officer pool"
+                })
+                severity_summary[sev] += 1
+                joint_opt_recommended = True
+            
+            # CASCADE_RISK
+            if c1 != c2:
+                nodes1 = get_corridor_nodes(c1)
+                nodes2 = get_corridor_nodes(c2)
+                if nodes1.intersection(nodes2):
+                    conflicts.append({
+                        "type": "CASCADE_RISK",
+                        "severity": "MEDIUM",
+                        "events": [ev1.get('id'), ev2.get('id')],
+                        "message": f"Adjacent corridors blocked ({c1} and {c2}) — cascade congestion likely",
+                        "fix": "Activate secondary diversion loops immediately"
+                    })
+                    severity_summary["MEDIUM"] += 1
+                    
+            # ZONE_CONFLICT
+            if z1 == z2 and z1 != 'General':
+                # only if they overlap somewhat in time, let's say within 6 hours
+                if abs(h1 - h2) <= 6:
+                    conflicts.append({
+                        "type": "ZONE_CONFLICT",
+                        "severity": "MEDIUM",
+                        "events": [ev1.get('id'), ev2.get('id')],
+                        "message": f"Multiple events in zone {z1} — DCP coordination required",
+                        "fix": "Alert Zone Commander"
+                    })
+                    severity_summary["MEDIUM"] += 1
+
+    return jsonify({
+        "success": True,
+        "conflicts": conflicts,
+        "severity_summary": severity_summary,
+        "joint_optimization_recommended": joint_opt_recommended
     })
 
 # Startup
