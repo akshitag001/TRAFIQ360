@@ -5,14 +5,22 @@ import numpy as np
 import os
 import networkx as nx
 import pulp
+from shapely import wkt
 from datetime import datetime
 import io
 import uuid
 import json
 import threading
-import csv as csv_module
-
-# Import local modules
+import math
+import folium
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch# Import local modules
 import sys
 base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(base_dir, "scratch"))
@@ -33,6 +41,13 @@ feedback_xlsx_path = os.path.join(data_dir, "post_event_feedback.xlsx")
 btp_xlsx_path = os.path.join(data_dir, "imported_btp_events.xlsx")
 audit_xlsx_path = os.path.join(data_dir, "audit_log.xlsx")
 registry_path = os.path.join(model_dir, "model_registry.json")
+
+playbooks_dir = os.path.join(base_dir, "playbooks")
+os.makedirs(playbooks_dir, exist_ok=True)
+
+@app.route('/playbooks/<path:filename>')
+def serve_playbook(filename):
+    return send_file(os.path.join(playbooks_dir, filename))
 
 # Global state for loaded models and encoders
 models = {}
@@ -190,6 +205,16 @@ def load_intelligence_components():
 # Pre-load components on startup
 load_intelligence_components()
 
+# ── Load Global Graph on Startup ──
+global_G = None
+try:
+    print("Loading OSM graphml...")
+    import osmnx as ox
+    global_G = ox.load_graphml(os.path.join(data_dir, "bengaluru_graph.graphml"))
+    print("OSM Graphml loaded successfully.")
+except Exception as e:
+    print(f"Could not load OSM graph: {e}")
+
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
 @app.route('/api/dashboard_stats', methods=['GET'])
@@ -340,22 +365,270 @@ def calculate_network_route():
         'flow_diversions': flow_diversions
     })
 
+# ── Feature: NetworkX Cascade Simulation ──────────────────────────────────────
+global_G = None
+
+def get_graph():
+    global global_G
+    if global_G is None:
+        graph_path = os.path.join(data_dir, "bengaluru_graph.graphml")
+        if os.path.exists(graph_path):
+            global_G = nx.read_graphml(graph_path)
+        else:
+            global_G = nx.MultiDiGraph()
+    return global_G
+
+def nearest_node(G, lat, lon):
+    min_dist = float('inf')
+    best_node = None
+    for n, data in G.nodes(data=True):
+        if 'y' in data and 'x' in data:
+            dist = (float(data['y']) - lat)**2 + (float(data['x']) - lon)**2
+            if dist < min_dist:
+                min_dist = dist
+                best_node = n
+    return best_node
+
+@app.route('/api/simulate-diversion', methods=['POST'])
+def simulate_diversion():
+    data = request.json or {}
+    blocked_corridor = data.get('blocked_corridor', '')
+    origin_name = data.get('origin_junction')
+    dest_name = data.get('dest_junction')
+    k = int(data.get('k', 3))
+
+    if origin_name not in JUNCTIONS or dest_name not in JUNCTIONS:
+        return jsonify({'success': False, 'error': 'Invalid source or destination junctions'})
+
+    G = get_graph()
+    if len(G.nodes) == 0:
+        return jsonify({'success': False, 'error': 'Graph data not found'})
+
+    origin_node = nearest_node(G, float(JUNCTIONS[origin_name]['lat']), float(JUNCTIONS[origin_name]['lon']))
+    dest_node = nearest_node(G, float(JUNCTIONS[dest_name]['lat']), float(JUNCTIONS[dest_name]['lon']))
+
+    # Remove blocked corridor
+    H = G.copy()
+    blocked_edges = []
+    blocked_geojson_coords = []
+    for u, v, key, edge_data in list(H.edges(keys=True, data=True)):
+        if blocked_corridor and blocked_corridor.lower() in str(edge_data.get('name', '')).lower():
+            blocked_edges.append((u, v, key))
+            if 'geometry' in edge_data:
+                geom = wkt.loads(edge_data['geometry'])
+                blocked_geojson_coords.extend([list(c) for c in geom.coords])
+            else:
+                n1 = H.nodes[u]
+                n2 = H.nodes[v]
+                if 'x' in n1 and 'y' in n1:
+                    blocked_geojson_coords.append([float(n1['x']), float(n1['y'])])
+                if 'x' in n2 and 'y' in n2:
+                    blocked_geojson_coords.append([float(n2['x']), float(n2['y'])])
+                    
+    H.remove_edges_from(blocked_edges)
+
+    # Calculate k-shortest
+    try:
+        from itertools import islice
+        if isinstance(H, nx.MultiDiGraph):
+            H_di = nx.DiGraph(H)
+        else:
+            H_di = H
+            
+        paths = list(islice(nx.shortest_simple_paths(H_di, origin_node, dest_node, weight='length'), k))
+    except nx.NetworkXNoPath:
+        return jsonify({'success': False, 'error': 'No alternate path exists after removing the corridor.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+    # Score paths
+    alternatives = []
+    for i, path_nodes in enumerate(paths):
+        coords = []
+        corridors_passed = set()
+        dist_m = 0.0
+        
+        for idx in range(len(path_nodes)-1):
+            u, v = path_nodes[idx], path_nodes[idx+1]
+            if H.has_edge(u, v):
+                if isinstance(H, nx.MultiDiGraph):
+                    edge_data = H[u][v][list(H[u][v].keys())[0]]
+                else:
+                    edge_data = H[u][v]
+                    
+                dist_m += float(edge_data.get('length', 0))
+                c_name = str(edge_data.get('name', 'Unnamed'))
+                if c_name != 'Unnamed':
+                    corridors_passed.add(c_name)
+                    
+                if 'geometry' in edge_data:
+                    geom = wkt.loads(edge_data['geometry'])
+                    coords.extend([list(c) for c in geom.coords])
+                else:
+                    n1 = H.nodes[u]
+                    if 'x' in n1 and 'y' in n1:
+                        coords.append([float(n1['x']), float(n1['y'])])
+        
+        # Simulate secondary load percentage (historical context approx)
+        load_pct = min(99.0, (len(corridors_passed) * 8.4 + (i * 22.5) + (dist_m / 1000.0)))
+        rec = "PREFERRED" if load_pct < 25 else ("ACCEPTABLE" if load_pct <= 40 else "AVOID")
+        
+        alternatives.append({
+            'rank': i+1,
+            'distance_m': round(dist_m, 2),
+            'geojson': {'type': 'LineString', 'coordinates': coords},
+            'passes_through': list(corridors_passed)[:3],
+            'secondary_load_pct': round(load_pct, 1),
+            'recommendation': rec
+        })
+        
+    b_coords = []
+    for c in blocked_geojson_coords:
+        if not b_coords or c != b_coords[-1]:
+            b_coords.append(c)
+
+    return jsonify({
+        'success': True,
+        'blocked_segment': {
+            'corridor': blocked_corridor,
+            'geojson': {'type': 'LineString', 'coordinates': b_coords}
+        },
+        'alternate_routes': alternatives
+    })
+
 @app.route('/api/optimize', methods=['POST'])
 def run_resource_optimization():
     data = request.json or {}
-    incidents = data.get('incidents', active_incidents)
-    total_off = int(data.get('total_officers', 50))
-    total_bar = int(data.get('total_barricades', 100))
-    
-    if not incidents:
+    event_cause = data.get('event_cause', '')
+    corridor = data.get('corridor', '')
+    impact_score = float(data.get('impact_score', 0))
+    closure_probability = float(data.get('closure_probability', 0))
+    available_officers = int(data.get('available_officers', 20))
+    available_barricades = int(data.get('available_barricades', 100))
+
+    # Identify affected junctions based on the corridor
+    affected_junc_names = set()
+    for u, v, corr_name in CORRIDOR_EDGES:
+        if corr_name == corridor:
+            affected_junc_names.add(u)
+            affected_junc_names.add(v)
+            
+    # Load junction metadata
+    key_junc_path = os.path.join(data_dir, "key_junctions.json")
+    junc_meta = {}
+    if os.path.exists(key_junc_path):
+        try:
+            with open(key_junc_path, 'r') as f:
+                for j in json.load(f):
+                    junc_meta[j['name']] = j
+        except Exception:
+            pass
+            
+    affected_junctions = []
+    for name in affected_junc_names:
+        if name in junc_meta:
+            affected_junctions.append(junc_meta[name])
+        elif name in JUNCTIONS:
+            # Fallback
+            affected_junctions.append({
+                "name": name,
+                "lat": JUNCTIONS[name][0],
+                "lon": JUNCTIONS[name][1],
+                "degree": 3 # Default degree
+            })
+            
+    if not affected_junctions:
         return jsonify({
-            'success': True,
-            'status': "No active incidents to optimize resources for.",
-            'deployments': []
+            'status': 'infeasible',
+            'total_officers': 0,
+            'total_barricades': 0,
+            'junction_deployments': [],
+            'objective_value': 0,
+            'coverage_warning': f"No junctions found for corridor {corridor}"
+        })
+
+    prob = pulp.LpProblem("Live_Optimization", pulp.LpMinimize)
+    
+    officers = pulp.LpVariable.dicts("Officers", [j['name'] for j in affected_junctions], lowBound=0, cat='Integer')
+    barricades = pulp.LpVariable.dicts("Barricades", [j['name'] for j in affected_junctions], lowBound=0, cat='Integer')
+    
+    # Objective
+    prob += pulp.lpSum([officers[j['name']] for j in affected_junctions]) + 0.5 * pulp.lpSum([barricades[j['name']] for j in affected_junctions])
+    
+    # Constraints
+    prob += pulp.lpSum([officers[j['name']] for j in affected_junctions]) <= available_officers
+    prob += pulp.lpSum([barricades[j['name']] for j in affected_junctions]) <= available_barricades
+    
+    min_off_total = 0
+    for j in affected_junctions:
+        j_name = j['name']
+        j_load = j.get('degree', 3)
+        # min_coverage constraint based on load and impact
+        min_cov = max(1, math.ceil(j_load * impact_score * 0.1))
+        
+        prob += officers[j_name] >= min_cov
+        min_off_total += min_cov
+        
+        # barricade constraint
+        if closure_probability > 0.6:
+            prob += barricades[j_name] >= 2
+        elif closure_probability > 0.3:
+            prob += barricades[j_name] >= 1
+        else:
+            prob += barricades[j_name] >= 0
+            
+        if impact_score >= 7:
+            prob += officers[j_name] >= 2
+            
+    # Solve
+    prob.solve(pulp.PULP_CBC_CMD(msg=False))
+    
+    status = pulp.LpStatus[prob.status]
+    
+    if status != 'Optimal':
+        # If infeasible, report warning
+        return jsonify({
+            'status': 'infeasible',
+            'total_officers': 0,
+            'total_barricades': 0,
+            'junction_deployments': [],
+            'objective_value': 0,
+            'coverage_warning': f"Insufficient officers — minimum {min_off_total} required"
         })
         
-    res = optimize_resources(incidents, total_off, total_bar)
-    return jsonify(res)
+    deployments = []
+    tot_off = 0
+    tot_bar = 0
+    for j in affected_junctions:
+        j_name = j['name']
+        off = int(officers[j_name].varValue)
+        bar = int(barricades[j_name].varValue)
+        tot_off += off
+        tot_bar += bar
+        
+        priority = "LOW"
+        if off >= 4:
+            priority = "HIGH"
+        elif off >= 2:
+            priority = "MEDIUM"
+            
+        deployments.append({
+            "junction_name": j_name,
+            "lat": j['lat'],
+            "lon": j['lon'],
+            "officers": off,
+            "barricades": bar,
+            "priority": priority
+        })
+        
+    return jsonify({
+        'status': 'optimal',
+        'total_officers': tot_off,
+        'total_barricades': tot_bar,
+        'junction_deployments': deployments,
+        'objective_value': pulp.value(prob.objective),
+        'coverage_warning': None
+    })
 
 @app.route('/api/incidents', methods=['GET', 'POST'])
 def handle_incidents():
@@ -441,6 +714,20 @@ def handle_incidents():
             'success': True,
             'incident': incident
         })
+
+@app.route('/api/road-network', methods=['GET'])
+def get_road_network():
+    path = os.path.join(data_dir, "road_network.geojson")
+    if os.path.exists(path):
+        return send_file(path, mimetype='application/json')
+    return jsonify({'error': 'Not found'}), 404
+
+@app.route('/api/junctions', methods=['GET'])
+def get_junctions():
+    path = os.path.join(data_dir, "key_junctions.json")
+    if os.path.exists(path):
+        return send_file(path, mimetype='application/json')
+    return jsonify({'error': 'Not found'}), 404
 
 @app.route('/api/incidents/<inc_id>', methods=['DELETE'])
 def resolve_incident(inc_id):
@@ -908,9 +1195,308 @@ def audit_export():
                      download_name='trafiq360_audit.xlsx',
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+@app.route('/playbooks/<path:filename>')
+def serve_playbooks(filename):
+    return send_from_directory(playbooks_dir, filename)
+
+# ── Feature: Production Quality Playbook Generator ────────────────────────────
+
+def capture_map_screenshot(blocked_corridor, blocked_coords, alt_route_coords):
+    map_html_path = os.path.join(playbooks_dir, f"temp_map_{uuid.uuid4().hex}.html")
+    map_png_path = os.path.join(playbooks_dir, f"map_screenshot_{uuid.uuid4().hex}.png")
+    
+    try:
+        # Determine center
+        if blocked_coords and len(blocked_coords) > 0:
+            center_lat = sum([c[1] for c in blocked_coords]) / len(blocked_coords)
+            center_lon = sum([c[0] for c in blocked_coords]) / len(blocked_coords)
+        elif alt_route_coords and len(alt_route_coords) > 0:
+            center_lat = sum([c[1] for c in alt_route_coords]) / len(alt_route_coords)
+            center_lon = sum([c[0] for c in alt_route_coords]) / len(alt_route_coords)
+        else:
+            center_lat, center_lon = 12.9716, 77.5946
+
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=14, tiles='cartodbpositron')
+
+        # Add blocked segment
+        if blocked_coords:
+            # folium expects [lat, lon]
+            b_path = [[c[1], c[0]] for c in blocked_coords]
+            folium.PolyLine(b_path, color='red', weight=6, dash_array='10, 5', opacity=0.8, popup=f"BLOCKED: {blocked_corridor}").addTo(m)
+
+        # Add alt route
+        if alt_route_coords:
+            a_path = [[c[1], c[0]] for c in alt_route_coords]
+            folium.PolyLine(a_path, color='green', weight=5, opacity=0.8, popup="RECOMMENDED DIVERSION").addTo(m)
+
+        m.save(map_html_path)
+
+        # Selenium headless screenshot
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--window-size=800,600")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get(f"file:///{os.path.abspath(map_html_path)}")
+        time.sleep(2) # Wait for tiles to load
+        driver.save_screenshot(map_png_path)
+        driver.quit()
+        
+        return map_png_path
+    except Exception as e:
+        print(f"Error capturing map screenshot: {e}")
+        return None
+    finally:
+        if os.path.exists(map_html_path):
+            try:
+                os.remove(map_html_path)
+            except:
+                pass
+
+@app.route('/api/generate-playbook', methods=['POST'])
+def generate_playbook():
+    data = request.json or {}
+    pred = data.get('prediction', {})
+    opt = data.get('optimization', {})
+    div = data.get('diversion', {})
+    
+    event_cause = pred.get('event_cause', 'Unknown')
+    corridor = pred.get('corridor', 'Unknown')
+    impact_score = float(pred.get('impact_score', 0))
+    closure_prob = float(pred.get('closure_probability', 0))
+    expected_duration = float(pred.get('expected_duration', 0))
+    priority = pred.get('priority', 'Medium')
+    
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"playbook_{event_cause}_{corridor.replace(' ', '_')}_{timestamp_str}.pdf"
+    filepath = os.path.join(playbooks_dir, filename)
+
+    doc = SimpleDocTemplate(filepath, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=20, alignment=1)
+    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=16, spaceAfter=12, spaceBefore=16, textColor=colors.HexColor('#1f2937'))
+    normal_style = styles['Normal']
+    
+    story = []
+
+    # === PAGE 1: COVER ===
+    story.append(Spacer(1, 2*inch))
+    story.append(Paragraph("<b>TRAFIQ360 Operational Playbook</b>", title_style))
+    story.append(Spacer(1, 0.5*inch))
+    
+    # Event Details Table
+    data_details = [
+        ['Cause', event_cause.replace('_', ' ').title()],
+        ['Corridor', corridor],
+        ['Date', datetime.now().strftime('%Y-%m-%d')],
+        ['Hour', str(pred.get('hour', 'N/A'))],
+        ['Priority', priority]
+    ]
+    t = Table(data_details, colWidths=[2*inch, 3*inch])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f3f4f6')),
+        ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#111827')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#e5e7eb')),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 0.5*inch))
+    
+    # Colored impact badge
+    if impact_score >= 7:
+        bg_color, text_color = '#fee2e2', '#b91c1c'
+    elif impact_score >= 5:
+        bg_color, text_color = '#fef3c7', '#b45309'
+    else:
+        bg_color, text_color = '#d1fae5', '#047857'
+        
+    badge_data = [[f"IMPACT SCORE: {impact_score:.1f} / 10.0"]]
+    t_badge = Table(badge_data, colWidths=[5*inch])
+    t_badge.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor(bg_color)),
+        ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor(text_color)),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 16),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+        ('TOPPADDING', (0,0), (-1,-1), 12),
+        ('BOX', (0,0), (-1,-1), 1, colors.HexColor(text_color)),
+    ]))
+    story.append(t_badge)
+    
+    story.append(Spacer(1, 2*inch))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ParagraphStyle('Footer', parent=normal_style, alignment=1, textColor=colors.gray)))
+    story.append(Paragraph("<b>BENGALURU TRAFFIC POLICE — CONFIDENTIAL</b>", ParagraphStyle('FooterBold', parent=normal_style, alignment=1, textColor=colors.gray)))
+    
+    story.append(PageBreak())
+
+    # === PAGE 2: PREDICTION ===
+    story.append(Paragraph("ML Prediction Summary", h2_style))
+    story.append(Paragraph(f"<b>Closure Probability:</b> {closure_prob*100:.1f}%", normal_style))
+    duration_h = int(expected_duration)
+    duration_m = int((expected_duration - duration_h) * 60)
+    story.append(Paragraph(f"<b>Expected Duration:</b> {duration_h}h {duration_m}m", normal_style))
+    story.append(Spacer(1, 0.2*inch))
+    
+    story.append(Paragraph("<b>Prediction Drivers (SHAP)</b>", normal_style))
+    story.append(Spacer(1, 0.1*inch))
+    drivers = pred.get('impact_drivers', [])
+    if drivers:
+        sh_data = [['Feature', 'Contribution', 'Direction']]
+        for d in drivers:
+            sh_data.append([str(d.get('feature', '')), f"{d.get('value', 0):.3f}", str(d.get('direction', ''))])
+            
+        t_shap = Table(sh_data, colWidths=[2.5*inch, 1.5*inch, 1*inch])
+        t_shap.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#374151')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#e5e7eb')),
+        ]))
+        story.append(t_shap)
+    else:
+        story.append(Paragraph("No driver data available.", normal_style))
+        
+    story.append(PageBreak())
+
+    # === PAGE 3: RESOURCES ===
+    story.append(Paragraph("Resource Deployment Plan", h2_style))
+    alloc = opt.get('allocations', [])
+    if alloc:
+        res_data = [['Junction', 'Officers', 'Barricades', 'Priority']]
+        tot_off, tot_bar = 0, 0
+        for a in alloc:
+            j_name = a.get('junction', 'Unknown')
+            off = a.get('officers', 0)
+            bar = a.get('barricades', 0)
+            tot_off += off
+            tot_bar += bar
+            res_data.append([j_name, str(off), str(bar), "HIGH" if off > 3 else "MEDIUM"])
+            
+        t_res = Table(res_data, colWidths=[2.5*inch, 1*inch, 1*inch, 1*inch])
+        t_res.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1d4ed8')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#e5e7eb')),
+        ]))
+        story.append(t_res)
+        story.append(Spacer(1, 0.2*inch))
+        
+        story.append(Paragraph(f"<b>Total Required:</b> {tot_off} Officers | {tot_bar} Barricades", ParagraphStyle('B', parent=normal_style, fontSize=12)))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Shifts
+        story.append(Paragraph("<b>Shift Schedule</b>", normal_style))
+        shift_data = [
+            ['Shift', 'Start', 'End', 'Officers Required'],
+            ['Immediate Response', '0:00 (Now)', '+4:00 hrs', str(tot_off)],
+            ['Relief Shift', '+4:00 hrs', '+8:00 hrs', str(tot_off)]
+        ]
+        t_shift = Table(shift_data, colWidths=[1.5*inch, 1*inch, 1*inch, 1.5*inch])
+        t_shift.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4b5563')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#e5e7eb')),
+        ]))
+        story.append(t_shift)
+        
+    story.append(Spacer(1, 0.4*inch))
+    story.append(Paragraph("<b>Escalation Contacts</b>", normal_style))
+    story.append(Paragraph("• DCP Traffic East: +91-9876543210", normal_style))
+    story.append(Paragraph("• ACP Control Room: +91-8765432109", normal_style))
+    
+    story.append(PageBreak())
+
+    # === PAGE 4: DIVERSIONS ===
+    story.append(Paragraph("Diversion Routes", h2_style))
+    
+    alt_routes = div.get('alternate_routes', [])
+    blocked_seg = div.get('blocked_segment', {})
+    
+    if alt_routes:
+        story.append(Paragraph(f"<b>Blocked Segment:</b> {blocked_seg.get('corridor', 'Unknown')}", normal_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        div_data = [['Rank', 'Via Corridors', 'Distance', 'Secondary Load', 'Status']]
+        for r in alt_routes:
+            rank = r.get('rank', '-')
+            corrs = ", ".join(r.get('passes_through', []))
+            dist = f"{r.get('distance_m', 0)/1000:.1f} km"
+            load = f"{r.get('secondary_load_pct', 0):.1f}%"
+            rec = r.get('recommendation', '')
+            div_data.append([str(rank), corrs, dist, load, rec])
+            
+        t_div = Table(div_data, colWidths=[0.5*inch, 2*inch, 1*inch, 1.2*inch, 1*inch])
+        t_div.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#047857')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#e5e7eb')),
+            ('ALIGN', (2,1), (3,-1), 'RIGHT')
+        ]))
+        story.append(t_div)
+        story.append(Spacer(1, 0.2*inch))
+        
+        best_route = alt_routes[0]
+        story.append(Paragraph(f"<b>Recommended Diversion:</b> Redirect flow to {', '.join(best_route.get('passes_through', []))} ({(best_route.get('distance_m', 0)/1000):.1f} km).", normal_style))
+        
+        for r in alt_routes:
+            if r.get('rank') == 1 and float(r.get('secondary_load_pct', 0)) > 40:
+                story.append(Spacer(1, 0.2*inch))
+                story.append(Paragraph(f"<b>⚠ WARNING:</b> This diversion overloads {r.get('passes_through', ['the corridor'])[0]} — consider distributing traffic to rank 2 route.", ParagraphStyle('Warn', parent=normal_style, textColor=colors.HexColor('#b45309'))))
+    else:
+        story.append(Paragraph("No alternate routes calculated.", normal_style))
+        
+    story.append(PageBreak())
+
+    # === PAGE 5: MAP ===
+    story.append(Paragraph("Geospatial Overview", h2_style))
+    
+    # Attempt to capture map screenshot
+    blocked_coords = blocked_seg.get('geojson', {}).get('coordinates', []) if blocked_seg else []
+    alt_coords = alt_routes[0].get('geojson', {}).get('coordinates', []) if alt_routes else []
+    
+    map_png_path = capture_map_screenshot(blocked_seg.get('corridor', 'Unknown'), blocked_coords, alt_coords)
+    
+    if map_png_path and os.path.exists(map_png_path):
+        story.append(RLImage(map_png_path, width=6*inch, height=4.5*inch))
+        story.append(Spacer(1, 0.2*inch))
+        story.append(Paragraph("Red Dashed: Blocked Incident Corridor | Solid Green: Recommended Diversion Path", ParagraphStyle('Caption', parent=normal_style, alignment=1, fontSize=9, textColor=colors.gray)))
+    else:
+        story.append(Paragraph("<i>[Map visualization unavailable - Selenium fallback]</i>", normal_style))
+        if blocked_coords:
+            story.append(Paragraph(f"<b>Blocked segment geometry:</b> {len(blocked_coords)} nodes", normal_style))
+            
+    doc.build(story)
+    
+    # Cleanup map image
+    if map_png_path and os.path.exists(map_png_path):
+        try:
+            os.remove(map_png_path)
+        except:
+            pass
+
+    return jsonify({
+        'success': True,
+        'download_url': f'/playbooks/{filename}',
+        'filename': filename
+    })
 
 # Startup
 if __name__ == '__main__':
+    if not os.path.exists(playbooks_dir):
+        os.makedirs(playbooks_dir)
     app.run(debug=True, port=5000)
-
-

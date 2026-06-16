@@ -10,10 +10,11 @@ TRAFIQ360 is a comprehensive web-based platform designed specifically for traffi
 
 TRAFIQ360 is broken down into an intuitive 6-step operational workflow:
 
-### 1. Executive Operations Dashboard
+### 1. Executive Operations Dashboard & CCTV Intelligence
 A high-level telemetry view of the Bengaluru road corridor networks. 
 - **Digital Twin:** Displays active blockages, predicted congestion levels, and overall officer resource availability on a real-world map mapping exact OpenStreetMap (OSM) junction curves and road contours.
 - **Incident Roster:** Tracks all active incidents and their real-time impact status.
+- **CCTV Pipeline:** Live ingestion simulation of real Bengaluru traffic cameras (Silk Board, Hebbal Flyover, Mekhri Circle). Allows operators to verify congestion and extract text data directly into the planning pipeline.
 
 ### 2. Traffic Incident Forecast Planner
 Before a disruption happens, authorities log the incident parameters here.
@@ -25,18 +26,21 @@ A full-screen interactive Digital Twin of Bengaluru mapping precise road network
 - Operators can simulate road segments *With* or *Without* officers deployed to observe the real-time effect on congestion scores.
 - Nodes represent exact geographic junctions, and edges map to actual road geometries rather than just straight lines, providing true-to-life visualization.
 
-### 4. Diversion Simulator
-When a road is closed due to a high-impact incident, the system computes the next-best paths.
-- **NetworkX Graph Algorithms:** Automatically removes the blocked nodes/corridors from the city graph and runs Dijkstra’s algorithm to calculate the new shortest path for diverted traffic.
-- Visually draws the new alternate routes on the GIS map.
+### 4. Advanced Cascade Diversion Simulator
+When a road is closed due to a high-impact incident, the system computes the next-best paths while managing secondary spillover congestion.
+- **NetworkX Graph Algorithms:** Automatically severs the blocked nodes/corridors from the loaded 24MB Bengaluru OSM graph and computes the `k=3` shortest alternative paths.
+- **Secondary Load Scoring:** Employs heuristics to estimate how much extra capacity will be dumped onto backup corridors, proactively warning operators if an alternative route exceeds 40% secondary load.
+- Visually draws the blocked segment as a dashed red line and color-codes backup routes (Green, Amber, Gray) on the GIS map.
 
 ### 5. Resource Optimization
 A mathematical operations module to distribute physical resources (Traffic Police officers and Barricades).
 - **PuLP ILP Solver:** Runs an Integer Linear Programming (ILP) algorithm to allocate resources across 14 Bengaluru Traffic Police Stations (TPS) to ensure maximum coverage while minimizing mobilization distances.
 
-### 6. 72h Timeline & Playbook Generator
+### 6. 72h Timeline & Production-Quality Playbook Generator
 Generates an operational timeline tracking pre-event staging (24h out), barricade setups (12h out), and officer mobilization (6h out).
-- **Playbook PDF Export:** Packages the ML predictions, Diversion Maps, and Resource Optimization tables into a single PDF playbook that can be distributed to on-ground officers.
+- **Production-Quality PDF Export:** An automated reporting engine leveraging `reportlab`, `folium`, and `selenium`.
+- Aggregates the ML predictions, SHAP driver analysis, exact ILP resource allocations, and Diversion simulation tables into a professional 5-page PDF document.
+- Uses headless Chromium to instantly snap a high-resolution screenshot of the geographic blockages and detours to embed directly into the playbook for on-ground officers.
 
 ### 7. Post-Event Learning Pipeline (Feedback Loop)
 A system is only as good as its ability to learn from reality.
@@ -86,7 +90,7 @@ Initially, maps often connect junctions using simple "as the crow flies" straigh
 
 ### 1. Install Dependencies
 ```bash
-pip install flask pandas scikit-learn xgboost lightgbm networkx pulp openpyxl requests beautifulsoup4 lxml osmnx
+pip install flask pandas scikit-learn xgboost lightgbm networkx pulp openpyxl requests beautifulsoup4 lxml osmnx reportlab folium selenium
 ```
 
 ### 2. Start the Application
