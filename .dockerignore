@@ -7,7 +7,7 @@ env/
 venv/
 .env
 .venv
-scratch/
+
 cache/
 server_run.log
 *.log
