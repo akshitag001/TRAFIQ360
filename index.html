@@ -3577,7 +3577,16 @@
         let currentRole = 'Operator';
 
         function toggleRole() {
-            currentRole = currentRole === 'Operator' ? 'Admin' : 'Operator';
+            if (currentRole === 'Operator') {
+                const pwd = prompt("Enter Admin Password to enable Model Retraining & Approvals:");
+                if (pwd !== "admin123") {
+                    alert("Incorrect password. Admin access denied.");
+                    return;
+                }
+                currentRole = 'Admin';
+            } else {
+                currentRole = 'Operator';
+            }
             const label = document.getElementById('role-label');
             const btn = document.getElementById('role-toggle-btn');
             if (label) label.textContent = currentRole;
