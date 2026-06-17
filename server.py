@@ -1840,5 +1840,6 @@ if __name__ == '__main__':
     os.makedirs(playbooks_dir, exist_ok=True)
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
-    print('[OK] Models loaded | Data ready | TRAFIQ360 at http://127.0.0.1:5000')
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 7860))
+    print(f'[OK] Models loaded | Data ready | TRAFIQ360 at http://0.0.0.0:{port}')
+    app.run(host='0.0.0.0', port=port, debug=False)

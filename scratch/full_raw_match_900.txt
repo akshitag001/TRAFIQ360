@@ -1,0 +1,70 @@
+Created At: 2026-06-16T19:19:54Z
+Completed At: 2026-06-16T19:19:54Z
+File Path: `file:///c:/Users/Akshit%20aggarwal/Downloads/TRAFIQ360/scratch/full_user_request.txt`
+Total Lines: 81
+Total Bytes: 4197
+Showing lines 1 to 81
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: <USER_REQUEST>
+2: You are a Senior Full-Stack Engineer and QA Engineer doing a complete final audit 
+3: and polish pass on TRAFIQ360 before hackathon submission.
+4: 
+5: Read and analyze EVERY file in the project — server.py, index.html, all files in 
+6: services/, scratch/, data/, models/, static/. Do not skip any file.
+7: 
+8: CRITICAL RULE: Do NOT change any existing CSS, colors, fonts, spacing, animations, 
+9: or visual styling. The UI design is final. Only fix functionality, logic, broken 
+10: connections, and content errors. If a fix requires touching a CSS property, only 
+11: change that one property and nothing else around it.
+12: 
+13: Perform the following tasks in this exact order:
+14: 
+15: ═══════════════════════════════════════════════════════════
+16: TASK 1 — FULL CODEBASE AUDIT (read all files first)
+17: ═══════════════════════════════════════════════════════════
+18: 
+19: Read every Python file and index.html completely. Then fix:
+20: 
+21: 1. All Python exceptions that would crash the server — missing imports, wrong 
+22:    variable names, file paths that don't exist, pickle load errors
+23: 
+24: 2. Every API endpoint in server.py — list every route with its method and confirm 
+25:    the frontend calls it at the exact same URL path with the exact same HTTP method.
+26:    Fix any 
+<truncated 963 bytes>
+smnx, openpyxl, reportlab, shap, beautifulsoup4, requests, lxml,
+48: joblib, geopandas, folium, selenium
+49: For any package imported but not in this list, add it unpinned.
+50: 
+51: ═══════════════════════════════════════════════════════════
+52: EXECUTION ORDER — follow this exactly
+53: ═══════════════════════════════════════════════════════════
+54: 
+55: Step 1: Read every file. Do not write anything yet.
+56: Step 2: Fix server.py — all backend errors (Tasks 1, 2, 5, 6)
+57: Step 3: Fix download routes (Task 3 backend part)
+58: Step 4: Fix index.html — functionality only, zero style changes (Tasks 3 frontend, 4)
+59: Step 5: Stability cleanup (Task 6)
+60: Step 6: Write README.md
+61: Step 7: Write requirements.txt
+62: 
+63: After all tasks print this summary:
+64: FILES MODIFIED: (list)
+65: ENDPOINTS ADDED: (list)  
+66: ENDPOINTS FIXED: (list)
+67: FRONTEND FIXES: (list)
+68: REMAINING MANUAL ITEMS: (list anything the IDE cannot fix automatically)
+69: </USER_REQUEST>
+70: <ADDITIONAL_METADATA>
+71: The current local time is: 2026-06-17T00:24:35+05:30.
+72: 
+73: The user's current state is as follows:
+74: Active Document: c:\Users\Akshit aggarwal\Downloads\TRAFIQ360\README.md (LANGUAGE_MARKDOWN)
+75: Cursor is on line: 120
+76: Other open documents:
+77: - c:\Users\Akshit aggarwal\Downloads\TRAFIQ360\README.md (LANGUAGE_MARKDOWN)
+78: </ADDITIONAL_METADATA>
+79: <USER_SETTINGS_CHANGE>
+80: The user changed setting `Model Selection` from Gemini 3.1 Pro (High) to Claude Sonnet 4.6 (Thinking). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+81: </USER_SETTINGS_CHANGE>
+The above content shows the entire, complete file contents of the requested file.
