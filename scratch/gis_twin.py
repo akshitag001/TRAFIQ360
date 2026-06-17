@@ -3,7 +3,7 @@ import numpy as np
 import folium
 import os
 import json
-import osmnx as ox
+
 
 # Define the junctions with coordinates from the dataset
 JUNCTIONS = {
@@ -115,53 +115,105 @@ def build_network():
 # Initialize High-level Graph
 G = build_network()
 
-# ── Load OSM driving graph ──
-base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-osm_path = os.path.join(base_dir, "bengaluru_net.graphml")
-
+# ── Load OSM driving graph (lazy loaded in background) ──
+import threading
 G_osm = None
+G_osm_loading = False
 JUNCTION_OSM_MAP = {}
 CORRIDOR_GEOMETRIES = {}
 
-if os.path.exists(osm_path):
+def _bg_load_osm():
+    global G_osm, G_osm_loading, JUNCTION_OSM_MAP, CORRIDOR_GEOMETRIES
     try:
-        print("Loading OpenStreetMap Digital Twin graph...")
-        G_osm = ox.load_graphml(osm_path)
-        print("OSM Graph loaded successfully. Mapping junctions to nearest OSM nodes...")
-        for junc_name, coords in JUNCTIONS.items():
-            # X = Longitude, Y = Latitude
-            node_id = ox.nearest_nodes(G_osm, X=coords[1], Y=coords[0])
-            JUNCTION_OSM_MAP[junc_name] = node_id
-        print("Junction-OSM node mapping complete.")
+        import osmnx as ox
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(base_dir, "data")
+        osm_path = os.path.join(data_dir, "bengaluru_graph.graphml")
+        if not os.path.exists(osm_path):
+            osm_path = os.path.join(base_dir, "bengaluru_net.graphml")
+            
+        junction_map_path = os.path.join(data_dir, "junction_osm_map.json")
+        corridor_geom_path = os.path.join(data_dir, "corridor_geometries.json")
         
-        # Pre-cache detailed OSM geometry for all base corridors
-        print("Pre-caching detailed OSM geometry for base corridors...")
-        for u, v, name in CORRIDOR_EDGES:
-            osm_u = JUNCTION_OSM_MAP.get(u)
-            osm_v = JUNCTION_OSM_MAP.get(v)
-            coords = None
-            if osm_u is not None and osm_v is not None:
-                # Try u -> v
-                try:
-                    path = nx.shortest_path(G_osm, osm_u, osm_v, weight='length')
-                    coords = [[G_osm.nodes[n]['y'], G_osm.nodes[n]['x']] for n in path]
-                except Exception:
-                    # Try v -> u
-                    try:
-                        path = nx.shortest_path(G_osm, osm_v, osm_u, weight='length')
-                        coords = [[G_osm.nodes[n]['y'], G_osm.nodes[n]['x']] for n in path]
-                        coords.reverse()
-                    except Exception:
-                        pass
-            if not coords:
-                coords = [list(JUNCTIONS[u]), list(JUNCTIONS[v])]
-            CORRIDOR_GEOMETRIES[(u, v)] = coords
-        print("Base corridor OSM geometries cached.")
-    except Exception as e:
-        print(f"Error loading/processing OSM graphml: {e}")
-        G_osm = None
+        if os.path.exists(junction_map_path) and os.path.exists(corridor_geom_path):
+            try:
+                print("Loading cached OSM routing data...", flush=True)
+                with open(junction_map_path, "r") as f:
+                    cached_map = json.load(f)
+                    for k, v in cached_map.items():
+                        JUNCTION_OSM_MAP[k] = int(v)
+                with open(corridor_geom_path, "r") as f:
+                    cached_geom = json.load(f)
+                    for k, val in cached_geom.items():
+                        parts = k.split("|||")
+                        if len(parts) == 2:
+                            u, v = parts[0], parts[1]
+                            CORRIDOR_GEOMETRIES[(u, v)] = val
+                # Still load the OSM graph for routing and dynamic shortest paths
+                if os.path.exists(osm_path):
+                    print("Lazy loading OpenStreetMap Digital Twin graph in background...", flush=True)
+                    G_osm = ox.load_graphml(osm_path)
+                    print("OSM Graph loaded successfully in background from cache path.", flush=True)
+                return
+            except Exception as e:
+                print(f"Error loading cached OSM files, falling back to full calculation: {e}", flush=True)
+                
+        if os.path.exists(osm_path):
+            try:
+                print("Lazy loading OpenStreetMap Digital Twin graph in background...", flush=True)
+                G_osm = ox.load_graphml(osm_path)
+                print("OSM Graph loaded successfully. Mapping junctions to nearest OSM nodes in background...", flush=True)
+                for junc_name, coords in JUNCTIONS.items():
+                    node_id = ox.nearest_nodes(G_osm, X=coords[1], Y=coords[0])
+                    JUNCTION_OSM_MAP[junc_name] = int(node_id)
+                print("Junction-OSM node mapping complete.", flush=True)
+                
+                # Save mapping to cache
+                os.makedirs(data_dir, exist_ok=True)
+                with open(junction_map_path, "w") as f:
+                    json.dump(JUNCTION_OSM_MAP, f)
+                
+                print("Pre-caching detailed OSM geometry for base corridors in background...", flush=True)
+                geom_to_save = {}
+                for u, v, name in CORRIDOR_EDGES:
+                    osm_u = JUNCTION_OSM_MAP.get(u)
+                    osm_v = JUNCTION_OSM_MAP.get(v)
+                    coords = None
+                    if osm_u is not None and osm_v is not None:
+                        try:
+                            path = nx.shortest_path(G_osm, osm_u, osm_v, weight='length')
+                            coords = [[G_osm.nodes[n]['y'], G_osm.nodes[n]['x']] for n in path]
+                        except Exception:
+                            try:
+                                path = nx.shortest_path(G_osm, osm_v, osm_u, weight='length')
+                                coords = [[G_osm.nodes[n]['y'], G_osm.nodes[n]['x']] for n in path]
+                            except Exception:
+                                pass
+                    if coords:
+                        CORRIDOR_GEOMETRIES[(u, v)] = coords
+                        CORRIDOR_GEOMETRIES[(v, u)] = coords
+                        geom_to_save[f"{u}|||{v}"] = coords
+                        geom_to_save[f"{v}|||{u}"] = coords
+                
+                with open(corridor_geom_path, "w") as f:
+                    json.dump(geom_to_save, f)
+                print("Base corridor OSM geometries cached and saved.", flush=True)
+            except Exception as e:
+                print(f"Error loading/processing OSM graphml in background: {e}", flush=True)
+                G_osm = None
+    finally:
+        G_osm_loading = False
+
+def ensure_osm_loaded():
+    global G_osm, G_osm_loading
+    if G_osm is not None or G_osm_loading:
+        return
+    G_osm_loading = True
+    t = threading.Thread(target=_bg_load_osm, daemon=True)
+    t.start()
 
 def get_corridies_with_geometries():
+    ensure_osm_loaded()
     res = []
     for u, v, name in CORRIDOR_EDGES:
         coords = CORRIDOR_GEOMETRIES.get((u, v)) or CORRIDOR_GEOMETRIES.get((v, u))
@@ -180,6 +232,7 @@ def calculate_route(source, target, closed_edges=[]):
     """
     Calculate primary shortest route, following street centerlines if OSM is available.
     """
+    ensure_osm_loaded()
     if G_osm is not None and source in JUNCTION_OSM_MAP and target in JUNCTION_OSM_MAP:
         G_temp = G_osm.copy()
         
@@ -252,6 +305,7 @@ def calculate_k_shortest_paths(source, target, k=3, closed_edges=[]):
     """
     Calculate top K shortest paths using OSM geometries if available.
     """
+    ensure_osm_loaded()
     if G_osm is not None and source in JUNCTION_OSM_MAP and target in JUNCTION_OSM_MAP:
         G_temp = G_osm.copy()
         
@@ -327,6 +381,7 @@ def calculate_k_shortest_paths(source, target, k=3, closed_edges=[]):
         return {'success': False, 'error': f"No route found between {source} and {target}."}
 
 def simulate_flow_diversion(closed_edge, base_incident_impact=7.0):
+    ensure_osm_loaded()
     u, v = closed_edge
     alternatives = []
     
@@ -370,6 +425,7 @@ def simulate_flow_diversion(closed_edge, base_incident_impact=7.0):
     return alternatives
 
 def generate_digital_twin_map(output_path, active_incidents=[]):
+    ensure_osm_loaded()
     m = folium.Map(location=[12.9716, 77.5946], zoom_start=12, tiles="Cartodb Positron")
     
     # Draw corridors

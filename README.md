@@ -1,125 +1,175 @@
-# TRAFIQ360 🚦
+# TRAFIQ360
+### Event-Driven Congestion Digital Twin & Predictive Operations Platform
 
-**An Event-Driven Congestion Digital Twin & Predictive Operations Platform for Bengaluru Traffic Police (BTP).**
-
-TRAFIQ360 is a comprehensive web-based platform designed specifically for traffic command centers. It bridges the gap between predictive machine learning, real-world Geographic Information Systems (GIS), and operations research to help city authorities plan for, simulate, and mitigate massive traffic disruptions such as VIP movements, IPL matches, and protests.
-
----
-
-## 🌟 Core Modules and Workflows
-
-TRAFIQ360 is broken down into an intuitive 6-step operational workflow:
-
-### 1. Executive Operations Dashboard & CCTV Intelligence
-A high-level telemetry view of the Bengaluru road corridor networks. 
-- **Digital Twin:** Displays active blockages, predicted congestion levels, and overall officer resource availability on a real-world map mapping exact OpenStreetMap (OSM) junction curves and road contours.
-- **Incident Roster & Conflict Detection:** Tracks all active incidents. Employs a **Multi-Event Conflict Detection Engine** that automatically checks for resource exhaustion, corridor overlaps, and zone clashes between multiple simultaneous events, warning operators with color-coded alerts.
-- **CCTV Pipeline:** Live ingestion simulation of real Bengaluru traffic cameras (Silk Board, Hebbal Flyover, Mekhri Circle). Allows operators to verify congestion and extract text data directly into the planning pipeline via Gemini Vision.
-
-### 2. Traffic Incident Forecast Planner
-Before a disruption happens, authorities log the incident parameters here.
-- **BTP Upcoming Events Feed:** Integrates directly with Bengaluru Traffic Police advisories (via scraping/API), allowing operators to click "Import" and auto-fill the planner with live city data.
-- **Predictive Engine:** Uses serialized machine learning models (XGBoost, LightGBM, Random Forest) to forecast Impact Scores (1-10), Duration, Required Officers, and Road Closure probabilities before the incident happens.
-
-### 3. GIS Operations & Digital Twin
-A full-screen interactive Digital Twin of Bengaluru mapping precise road networks.
-- Operators can simulate road segments *With* or *Without* officers deployed to observe the real-time effect on congestion scores.
-- Nodes represent exact geographic junctions, and edges map to actual road geometries rather than just straight lines, providing true-to-life visualization.
-
-### 4. Advanced Cascade Diversion Simulator
-When a road is closed due to a high-impact incident, the system computes the next-best paths while managing secondary spillover congestion.
-- **NetworkX Graph Algorithms:** Automatically severs the blocked nodes/corridors from the loaded 24MB Bengaluru OSM graph and computes the `k=3` shortest alternative paths.
-- **Secondary Load Scoring:** Employs heuristics to estimate how much extra capacity will be dumped onto backup corridors, proactively warning operators if an alternative route exceeds 40% secondary load.
-- Visually draws the blocked segment as a dashed red line and color-codes backup routes (Green, Amber, Gray) on the GIS map.
-
-### 5. Resource Optimization
-A mathematical operations module to distribute physical resources (Traffic Police officers and Barricades).
-- **PuLP ILP Solver:** Runs an Integer Linear Programming (ILP) algorithm to allocate resources across 14 Bengaluru Traffic Police Stations (TPS) to ensure maximum coverage while minimizing mobilization distances.
-
-### 6. 72h Timeline & Production-Quality Playbook Generator
-Generates an operational timeline tracking pre-event staging (24h out), barricade setups (12h out), and officer mobilization (6h out).
-- **Production-Quality PDF Export:** An automated reporting engine leveraging `reportlab`, `folium`, and `selenium`.
-- Aggregates the ML predictions, SHAP driver analysis, exact ILP resource allocations, and Diversion simulation tables into a professional 5-page PDF document.
-- Uses headless Chromium to instantly snap a high-resolution screenshot of the geographic blockages and detours to embed directly into the playbook for on-ground officers.
-
-### 7. Post-Event Learning Pipeline (Feedback Loop)
-A system is only as good as its ability to learn from reality.
-- **Operational Feedback:** Operators submit the *actual* impact, duration, and resource counts after an event concludes.
-- **Approval Queue:** Administrators review the submitted feedback through the Approval Queue tab.
-- **Dynamic Retraining:** Once approved, administrators can trigger a model retraining loop directly from the UI. The system appends the real-world feedback to the original training dataset and trains new XGBoost and LightGBM models, logging the decline in RMSE.
-- **Live Model Registry & Hot-Rollbacks:** The system tracks all trained ML versions (e.g., `v1.1`, `v1.2`) in a visual `Chart.js` line graph. Administrators can view performance telemetry and instantly **Rollback** to prior versions. The backend dynamically hot-reloads the selected `.pkl` weights into Flask memory without taking the server offline.
+TRAFIQ360 is an AI-powered traffic operations platform built for the Bengaluru Traffic Police that predicts the congestion impact of planned and unplanned events, optimally deploys officers using Integer Linear Programming, and simulates real-time road network diversions — all from a single browser dashboard. Unlike passive dashboards, TRAFIQ360 closes the loop: it learns from post-event officer feedback and automatically retrains its ML models to improve future predictions.
 
 ---
 
-## 🧠 Machine Learning Architecture in Detail
+## System Architecture
 
-TRAFIQ360 relies on a hybrid ensemble of machine learning models trained on historical Bengaluru traffic data (weather conditions, public holidays, time of day, and event causality).
-
-### The Prediction Models
-1. **Impact Score (XGBoost Regressor):** Predicts the severity of the congestion on a scale of 1-10.
-2. **Expected Duration (LightGBM Regressor):** Forecasts how long the congestion will last in minutes.
-3. **Road Closure Probability (Random Forest Classifier):** A binary classifier predicting the likelihood that physical barricading and road closures will be required.
-
-### The Retraining Feedback Loop & Model Registry
-Instead of relying on static, decaying models, TRAFIQ360 features a Continuous Integration pipeline for data:
-1. When actual event metrics are submitted and approved, they are logged into `data/post_event_feedback.xlsx`.
-2. The Admin clicks **"⚡ Retrain Models"**.
-3. A background Python thread spins up `scratch/retrain_pipeline.py`.
-4. The pipeline merges the historical dataset with the newly acquired ground truth data.
-5. The models are re-fitted and benchmarked against a fixed 20% hold-out validation set (`data/test_set.csv`).
-6. The system evaluates the new Mean Squared Error (MSE), Root Mean Squared Error (RMSE), and Area Under Curve (AUC).
-7. **Auto-Promotion:** If the LightGBM closure AUC improves by `+0.005`, the new model is auto-promoted to `ACTIVE` (e.g. `v1.1`), otherwise it is saved as a `CHALLENGER`.
-8. The registry UI dynamically updates to reflect the new pipeline telemetry.
-
----
-
-## 🗺️ GIS & OpenStreetMap (OSM) Integration
-
-Initially, maps often connect junctions using simple "as the crow flies" straight lines. TRAFIQ360 implements an advanced `gis_twin.py` script that:
-- Queries the Overpass API for Bengaluru's bounding box.
-- Downloads the physical road network (highways, trunks, primary roads) and projects it into a local UTM coordinate system.
-- Simplifies the network into a routing graph using `osmnx`.
-- Traces the actual geographic curves, flyovers, and turns of 31 critical Bengaluru corridors (e.g., Outer Ring Road, Silk Board Junction, Mekhri Circle).
-- Pushes these true geometries as GeoJSON paths to the frontend Leaflet maps.
-
----
-
-## ⚙️ Installation & Running the Platform
-
-### Prerequisites
-- Python 3.9+
-- Pip package manager
-
-### 1. Install Dependencies
-```bash
-pip install flask pandas scikit-learn xgboost lightgbm networkx pulp openpyxl requests beautifulsoup4 lxml osmnx reportlab folium selenium
+```
+Dataset (8,173 rows)
+     │
+     ▼
+Feature Engineering  ──►  [XGBoost Impact] [XGBoost Duration] [LightGBM Closure]
+     │                              │
+     │                       Flask REST API (server.py)
+     │                              │
+     ├─── OSM Graph (NetworkX) ────►├─── /api/simulate-diversion
+     ├─── ILP Optimizer (PuLP) ────►├─── /api/optimize
+     ├─── SHAP Explainer ──────────►├─── /api/predict
+     ├─── BTP Event Scraper ───────►├─── /api/btp/events
+     └─── Model Registry ──────────►└─── /api/model-versions
+                                          │
+                                    Leaflet.js Frontend (index.html)
+                                          │
+                              PDF/Excel/CSV Export
 ```
 
-### 2. Start the Application
-Run the Flask server from the root directory:
-```bash
-python server.py
-```
-
-### 3. Access the Dashboard
-Open your web browser and navigate to:
-```text
-http://127.0.0.1:5000/
-```
-
-### 4. Judge Demo Mode
-For a quick overview of all features during a presentation, click the **Judge Demo** button in the top right corner of the header. The system will run an automated 6-step walkthrough demonstrating the full power of TRAFIQ360.
+| Component | Role |
+|---|---|
+| `server.py` | Flask API — 30+ endpoints; model inference, ILP, graph routing, PDF generation |
+| `index.html` | Single-page React-less UI with Leaflet maps, Chart.js graphs, 7 functional tabs |
+| `scratch/gis_twin.py` | OSM NetworkX digital twin — junction mapping, k-shortest path routing |
+| `scratch/optimizer.py` | PuLP ILP resource allocator — officers + barricades with soft constraints |
+| `scratch/retrain_pipeline.py` | Auto-promotes new model versions if AUC improves by ≥0.005 |
+| `services/btp_event_service.py` | BTP event scraper with 5 production-quality fallback advisories |
+| `data/model_versions.json` | Model registry — version, AUC, RMSE, active status |
 
 ---
 
-## 🗂️ Project Structure
+## Machine Learning Models
 
-- `server.py`: The main Flask backend containing API endpoints and the ML inference logic.
-- `index.html`: The single-page application (SPA) frontend utilizing vanilla JS, HTML/CSS, and Leaflet.js.
-- `services/`: Contains backend integrations, such as `btp_event_service.py` for fetching live advisories.
-- `scratch/`: Contains complex algorithmic implementations such as `gis_twin.py` (OSM graphs) and `retrain_pipeline.py`.
-- `data/`: Contains the stateful databases (Excel/CSV) tracking active incidents, audit logs, and post-event feedback.
-- `models/`: Directory where the `pickle` and `joblib` machine learning models are serialized.
-- `static/`: Contains icons and CSS assets.
+| Model | Task | Algorithm | Key Metric | Score |
+|---|---|---|---|---|
+| Impact Score | Regression (1–10) | XGBoost | RMSE | ~0.42 |
+| Duration | Regression (minutes) | XGBoost (log scale) | RMSE | ~18 min |
+| Road Closure | Binary Classification | LightGBM | AUC-ROC | ~0.83 |
 
-*Built for the Smart City Hackathon. Empowering the Bengaluru Traffic Police with proactive intelligence.*
+**Features used:** `event_cause`, `corridor`, `zone`, `junction`, `hour`, `day_of_week`, `event_type`, `priority`, `historical_severity`
+
+**SHAP explainability** is computed for every prediction, returning the top 3 feature contributions with direction (up/down) to the impact score.
+
+---
+
+## Installation
+
+1. `git clone https://github.com/akshitag001/TRAFIQ360.git`
+2. `cd TRAFIQ360`
+3. `pip install -r requirements.txt`
+4. `python server.py`
+5. Open `http://127.0.0.1:5000`
+
+> **Note:** The OSM graph file (`data/bengaluru_graph.graphml`, ~24 MB) is included in the repo. First startup takes ~15–20 seconds to load the graph and ML models.
+
+---
+
+## Judge Demo — 6 Step Walkthrough
+
+1. **Forecast tab** → Fill in: Event Cause = `IPL Match (public_event)`, Corridor = `CBD 2`, Hour = `19`, Priority = `High` → Click **"Analyze Impact"** → See impact score, closure probability, SHAP drivers rendered.
+
+2. **Wait 2 seconds** → The prediction result panel shows score in red (≥7) with 3 SHAP feature explanations below.
+
+3. **GIS Digital Twin tab** → Map auto-loads with Bengaluru road network. Click **"Simulate Diversion"** with Origin = `MekhriCircle`, Destination = `SilkBoardJunc` → 3 ranked alternate routes drawn on map with load percentages.
+
+4. **Resources tab** → Adjust officer slider to 30 → Click **"Run ILP Optimization"** → Junction deployment table appears with optimal officer/barricade allocation per junction.
+
+5. **Forecast tab** → Click **"Generate Operational Playbook (PDF)"** → 5-page PDF auto-downloads with cover page, SHAP table, ILP deployment table, diversion routes.
+
+6. **Learning tab** → Click **"Trigger Retraining"** → Progress bar updates every 2 seconds → On completion, new model version appears in the Model Registry chart.
+
+> **Keyboard shortcut:** `Ctrl+D` triggers the judge demo sequence automatically.
+
+---
+
+## API Reference
+
+| Endpoint | Method | Description | Key Inputs | Key Outputs |
+|---|---|---|---|---|
+| `/api/predict` | POST | ML impact prediction + SHAP | event_cause, corridor, hour | impact_score, closure_prob, duration, shap_drivers |
+| `/api/optimize` | POST | ILP resource allocation | corridor, impact_score, available_officers | junction_deployments, total_officers |
+| `/api/simulate-diversion` | POST | k-shortest path routing | origin_junction, dest_junction, blocked_corridor | alternate_routes, blocked_segment |
+| `/api/detect-conflicts` | POST | Multi-event conflict detection | events[] | conflicts[], severity_summary |
+| `/api/generate-playbook` | POST | 5-page PDF playbook | prediction, optimization, diversion | download_url |
+| `/api/btp/events` | GET | BTP advisory import | — | events[] with matched junction/corridor |
+| `/api/btp/import` | POST | Save event to XLSX | event | success |
+| `/api/retrain` | POST | Background model retrain | — | job_id |
+| `/api/retrain/status/<id>` | GET | Retrain progress | job_id | status, progress%, message |
+| `/api/model-versions` | GET | Registry of all model versions | — | versions[] with AUC/RMSE |
+| `/api/active-model` | GET | Currently active model | — | version, metrics |
+| `/api/rollback-model` | POST | Hot-swap active model version | version | success |
+| `/api/feedback/submit` | POST | Post-event feedback | actual_impact, actual_duration | feedback_id |
+| `/api/feedback/list` | GET | All feedback records | — | records[], stats |
+| `/api/feedback/approve/<id>` | POST | Approve feedback for training | approver | success |
+| `/api/dashboard/summary` | GET | Dashboard summary cards | — | active_incidents, avg_impact |
+| `/api/dashboard/hourly` | GET | Hourly event distribution | — | hour→count data |
+| `/api/generate-timeline` | GET | Pre-event 72h milestones | event_cause, corridor | milestones[] |
+| `/api/system-health` | GET | Model file presence, sizes | — | models dict, active_version |
+| `/api/corridors` | GET | Corridor geometry list | — | corridors[] with coordinates |
+| `/api/causes` | GET | Unique event causes | — | causes[] |
+| `/download/playbook/<file>` | GET | Force-download PDF | filename | PDF binary |
+| `/api/incidents` | GET/POST | Active incidents | event data | incidents[] |
+| `/api/audit/logs` | GET | Audit trail | — | logs[] |
+| `/api/audit/export` | GET | Download audit XLSX | — | Excel file |
+
+---
+
+## Dataset
+
+**Source:** Astram (Bengaluru Traffic Management) — anonymized event records  
+**Size:** 8,173 rows × 15+ columns  
+**Period:** November 2023 – April 2024  
+**City:** Bengaluru, Karnataka, India
+
+**Key features:** `event_cause`, `corridor`, `zone`, `junction`, `start_datetime`, `closed_datetime`, `event_type`, `priority`, `requires_road_closure`, `resolution_mins`
+
+**Computed features:** `hour`, `day_of_week`, `historical_severity` (per-cause mean impact), `calculated_impact_score` (derived from cause severity × time multiplier × closure + duration factors)
+
+---
+
+## Project Structure
+
+```
+TRAFIQ360/
+├── server.py                    # Flask API — 30+ endpoints, ML inference, PDF gen
+├── index.html                   # Single-page frontend — 7 tabs, Leaflet, Chart.js
+├── requirements.txt             # Pinned Python dependencies
+├── models/
+│   ├── best_impact_model.joblib # Active XGBoost impact regressor
+│   ├── best_duration_model.joblib
+│   ├── best_closure_model.joblib
+│   ├── label_encoders.joblib    # Fitted LabelEncoders for all categorical cols
+│   ├── cause_means.joblib       # Historical severity per event cause
+│   ├── active_version.txt       # Currently active model version string
+│   └── xgb_imp_v1.x.pkl        # Versioned model snapshots
+├── data/
+│   ├── model_versions.json      # Model registry — version, AUC, RMSE, is_active
+│   ├── bengaluru_graph.graphml  # OSM road network (NetworkX MultiDiGraph)
+│   ├── road_network.geojson     # Corridor geometry for map rendering
+│   ├── key_junctions.json       # Junction metadata (lat/lon, degree)
+│   ├── post_event_feedback.xlsx # Officer feedback for continuous learning
+│   └── audit_log.xlsx           # Full action audit trail
+├── scratch/
+│   ├── gis_twin.py              # OSM Digital Twin — routing, flow simulation
+│   ├── optimizer.py             # PuLP ILP resource allocator
+│   ├── retrain_pipeline.py      # Auto-retraining with registry + promotion
+│   └── train_models.py          # Initial model training script
+├── services/
+│   └── btp_event_service.py     # BTP event scraper + normalization
+├── playbooks/                   # Generated PDF playbooks (auto-created)
+└── static/                      # Icons, CCTV images
+```
+
+---
+
+## Known Limitations
+
+The OSM road network is pre-cached (`bengaluru_graph.graphml`) and reflects the road topology at download time — live traffic incidents are not fetched from a real-time source. The CCTV intelligence pipeline uses simulated image inputs with Gemini Vision analysis; a real deployment would require authenticated CCTV feed APIs. Model retraining must be manually triggered from the Learning tab — there is no automated scheduler for production deployment. The ILP solver uses a 3-second time limit to guarantee UI responsiveness; very large officer pools with many junctions may return a proportional fallback rather than the true optimal. SHAP values are computed on the fly and may be slow (~200ms) for the first prediction after server start.
+
+---
+
+## Built for
+
+**Flipkart Grid 7.0 — 2025**  
+**Track:** Smart City / Event-Driven Congestion (Planned & Unplanned)  
+**Team:** TRAFIQ360

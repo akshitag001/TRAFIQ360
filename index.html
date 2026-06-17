@@ -2122,9 +2122,9 @@
                 events: activeIncidentList.map(inc => ({
                     id: inc.id || 'INC-' + Math.floor(Math.random()*1000),
                     corridor: inc.corridor,
-                    hour: parseInt(inc.time) || 12,
-                    cause: inc.cause,
-                    impact_score: parseFloat(inc.impact),
+                    hour: parseInt(inc.hour) || 12,
+                    cause: inc.event_cause,
+                    impact_score: parseFloat(inc.impact_score) || 5.0,
                     available_officers: getAvailableOfficers(),
                     zone: inc.zone || null
                 }))
@@ -3197,9 +3197,32 @@
             });
         }
 
-        function downloadFeedbackXLSX() { window.open('/api/feedback/export', '_blank'); }
-        function downloadFeedbackCSV() { window.open('/api/feedback/export/csv', '_blank'); }
-        function downloadAuditXLSX() { window.open('/api/audit/export', '_blank'); }
+        // ── Blob download helper (prevents opening in new tab) ──────────────
+        function _blobDownload(url, filename) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 30000);
+            fetch(url, { signal: ctrl.signal })
+                .then(res => {
+                    if (!res.ok) throw new Error('Download failed: ' + res.status);
+                    return res.blob();
+                })
+                .then(blob => {
+                    clearTimeout(timer);
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = filename;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                })
+                .catch(err => {
+                    clearTimeout(timer);
+                    console.error('Download error:', err.message);
+                });
+        }
+
+        function downloadFeedbackXLSX() { _blobDownload('/api/feedback/export', 'trafiq360_feedback.xlsx'); }
+        function downloadFeedbackCSV()  { _blobDownload('/api/feedback/export/csv', 'trafiq360_feedback.csv'); }
+        function downloadAuditXLSX()   { _blobDownload('/api/audit/export', 'trafiq360_audit.xlsx'); }
 
         // ── Feature 1: Retrain Models ─────────────────────────────────────────
         let retrainJobId = null;
@@ -3935,7 +3958,8 @@
                 txt.textContent = 'Generate Operational Playbook (PDF)';
                 
                 if (data.success && data.download_url) {
-                    window.location.href = data.download_url;
+                    // Use blob download — prevents 'opened in tab' behaviour
+                    _blobDownload(data.download_url, data.filename || 'playbook.pdf');
                 } else {
                     errBox.textContent = "Error generating playbook.";
                     errBox.style.display = 'block';
@@ -4021,6 +4045,61 @@
                 updateModelTracker();
             });
         };
+
+        // ─── Global error handler ───────────────────────────────────────
+        window.onerror = function(msg, src, line) {
+            // Show subtle indicator, no alert()
+            const indicator = document.getElementById('global-error-indicator');
+            if (indicator) {
+                indicator.textContent = '⚠ JS Error: ' + msg.substring(0, 60);
+                indicator.style.display = 'block';
+                setTimeout(() => { indicator.style.display = 'none'; }, 5000);
+            }
+            return false; // allow default console logging
+        };
+
+        // ─── Ctrl+D → Judge Demo ────────────────────────────────────────
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'd') {
+                e.preventDefault();
+                const demoBtn = document.getElementById('judge-demo-btn') ||
+                                document.querySelector('[onclick*="runJudgeDemo"]') ||
+                                document.querySelector('[onclick*="judgeDemo"]');
+                if (demoBtn) demoBtn.click();
+            }
+        });
+
+        // ─── Live clock — HH:MM:SS IST ──────────────────────────────────
+        function _updateLiveClock() {
+            const clocks = document.querySelectorAll('.live-clock, #live-clock, [data-live-clock]');
+            if (clocks.length === 0) return;
+            const now = new Date();
+            const ist = new Date(now.getTime() + (5.5 * 3600000));
+            const hh = String(ist.getUTCHours()).padStart(2, '0');
+            const mm = String(ist.getUTCMinutes()).padStart(2, '0');
+            const ss = String(ist.getUTCSeconds()).padStart(2, '0');
+            const str = hh + ':' + mm + ':' + ss + ' IST';
+            clocks.forEach(el => { el.textContent = str; });
+        }
+        setInterval(_updateLiveClock, 1000);
+        _updateLiveClock();
+
+        // ─── Leaflet invalidateSize when GIS tab shown ───────────────────
+        (function patchTabsForLeaflet() {
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(m) {
+                    if (m.target && m.target.id && m.target.id.includes('gis')) {
+                        if (window.mapInstance) {
+                            setTimeout(() => window.mapInstance.invalidateSize(), 150);
+                        }
+                    }
+                });
+            });
+            // Observe all pg-* containers for class changes (active/hidden)
+            document.querySelectorAll('[id^="pg-"]').forEach(el => {
+                observer.observe(el, { attributes: true, attributeFilter: ['style', 'class'] });
+            });
+        })();
     </script>
 </body>
 </html>
