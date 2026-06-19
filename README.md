@@ -1,5 +1,10 @@
 
 # TRAFIQ360
+
+<div align="center">
+  <img src="assets/logo.png" alt="TRAFIQ360 Logo" width="300" />
+</div>
+
 ### Event-Driven Congestion Digital Twin & Predictive Operations Platform
 
 TRAFIQ360 is an AI-powered traffic operations platform built for the Bengaluru Traffic Police that predicts the congestion impact of planned and unplanned events, optimally deploys officers using Integer Linear Programming, and simulates real-time road network diversions — all from a single browser dashboard. Unlike passive dashboards, TRAFIQ360 closes the loop: it learns from post-event officer feedback and automatically retrains its ML models to improve future predictions.
