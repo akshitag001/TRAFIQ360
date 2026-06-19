@@ -169,8 +169,3 @@ The OSM road network is pre-cached (`bengaluru_graph.graphml`) and reflects the 
 
 ---
 
-## Built for
-
-**Flipkart Grid 7.0 — 2025**  
-**Track:** Smart City / Event-Driven Congestion (Planned & Unplanned)  
-**Team:** TRAFIQ360
