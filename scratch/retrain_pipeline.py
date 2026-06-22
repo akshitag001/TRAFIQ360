@@ -14,7 +14,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error, mean_absolute_error, roc_auc_score
 import xgboost as xgb
-import lightgbm as lgb
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSV_PATH = os.path.join(BASE_DIR, "Astram event data_anonymized - Astram event data_anonymizedb40ac87.csv")
@@ -205,11 +204,11 @@ def retrain(progress_callback=None):
     xgb_dur.fit(X_train, np.log1p(yd_train))
     dur_rmse = float(np.sqrt(mean_squared_error(yd_test, np.expm1(xgb_dur.predict(X_test)))))
 
-    progress(80, "Training Closure model (LightGBM)...")
-    lgb_cls = lgb.LGBMClassifier(n_estimators=100, random_state=42, verbose=-1)
-    lgb_cls.fit(X_train, yc_train)
+    progress(80, "Training Closure model (XGBoost)...")
+    xgb_cls = xgb.XGBClassifier(n_estimators=100, random_state=42, use_label_encoder=False, eval_metric='logloss')
+    xgb_cls.fit(X_train, yc_train)
     try:
-        cls_auc = float(roc_auc_score(yc_test, lgb_cls.predict_proba(X_test)[:, 1]))
+        cls_auc = float(roc_auc_score(yc_test, xgb_cls.predict_proba(X_test)[:, 1]))
     except Exception:
         cls_auc = 0.0
 
@@ -250,13 +249,13 @@ def retrain(progress_callback=None):
     # Save physical files with version tags
     joblib.dump(xgb_imp, os.path.join(MODEL_DIR, f'xgb_imp_{new_version}.pkl'))
     joblib.dump(xgb_dur, os.path.join(MODEL_DIR, f'xgb_dur_{new_version}.pkl'))
-    joblib.dump(lgb_cls, os.path.join(MODEL_DIR, f'lgb_cls_{new_version}.pkl'))
+    joblib.dump(xgb_cls, os.path.join(MODEL_DIR, f'xgb_cls_{new_version}.pkl'))
     
     if promote:
         # Save as active models
         joblib.dump(xgb_imp, os.path.join(MODEL_DIR, 'best_impact_model.joblib'))
         joblib.dump(xgb_dur, os.path.join(MODEL_DIR, 'best_duration_model.joblib'))
-        joblib.dump(lgb_cls, os.path.join(MODEL_DIR, 'best_closure_model.joblib'))
+        joblib.dump(xgb_cls, os.path.join(MODEL_DIR, 'best_closure_model.joblib'))
         
         with open(ACTIVE_TXT_PATH, "w") as f:
             f.write(new_version)
