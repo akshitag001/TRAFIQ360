@@ -169,6 +169,8 @@ def _load_registry() -> list:
 def load_intelligence_components():
     global models, encoders, cause_means, historical_stats, impact_explainer
     print("Loading serialized ML components...")
+    global ml_load_error
+    ml_load_error = None
     try:
         models['impact'] = joblib.load(os.path.join(model_dir, 'best_impact_model.joblib'))
         models['duration'] = joblib.load(os.path.join(model_dir, 'best_duration_model.joblib'))
@@ -181,7 +183,9 @@ def load_intelligence_components():
         
         print("All ML models and SHAP explainers loaded successfully.")
     except Exception as e:
-        print(f"Error loading ML components: {e}")
+        import traceback
+        ml_load_error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+        print(f"Error loading ML components: {ml_load_error}")
 
     # Load high-level stats from CSV
     try:
@@ -799,6 +803,9 @@ def handle_incidents():
                 shap_drivers.append({"feature": display_feat, "value": abs(val), "direction": direction})
                 
         except Exception as e:
+            global ml_load_error
+            if 'ml_load_error' in globals() and ml_load_error:
+                return jsonify({'success': False, 'error': f"Failed to predict new incident: {e}. ROOT CAUSE: {ml_load_error}"})
             return jsonify({'success': False, 'error': f"Failed to predict new incident: {e}"})
             
         incident = {
