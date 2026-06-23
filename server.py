@@ -181,18 +181,24 @@ def load_intelligence_components():
         import shap
         import json
         
-        # Patch for old SHAP versions crashing on XGBoost >= 2.0 array formatted base_score
-        booster = models['impact'].get_booster()
-        config = json.loads(booster.save_config())
+        # Monkey patch json.loads to intercept SHAP's parsing of XGBoost config
+        original_loads = json.loads
+        def patched_loads(*args, **kwargs):
+            res = original_loads(*args, **kwargs)
+            if isinstance(res, dict) and 'learner' in res:
+                try:
+                    bs = res['learner'].get('learner_model_param', {}).get('base_score', '')
+                    if isinstance(bs, str) and bs.startswith('[') and bs.endswith(']'):
+                        res['learner']['learner_model_param']['base_score'] = bs.strip('[]')
+                except Exception:
+                    pass
+            return res
+            
+        json.loads = patched_loads
         try:
-            bs = config.get("learner", {}).get("learner_model_param", {}).get("base_score", "")
-            if isinstance(bs, str) and bs.startswith("[") and bs.endswith("]"):
-                config["learner"]["learner_model_param"]["base_score"] = bs.strip("[]")
-                booster.load_config(json.dumps(config))
-        except Exception:
-            pass
-
-        impact_explainer = shap.TreeExplainer(models['impact'])
+            impact_explainer = shap.TreeExplainer(models['impact'])
+        finally:
+            json.loads = original_loads
         
         print("All ML models and SHAP explainers loaded successfully.")
     except Exception as e:
