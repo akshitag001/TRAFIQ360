@@ -194,8 +194,9 @@ def retrain(progress_callback=None):
         df_combined.loc[test_indices].to_csv(TEST_CSV_PATH, index=False)
 
     # ── Train models ─────────────────────────────────────────────────────────
-    progress(40, "Training Impact Score model (XGBoost)...")
-    xgb_imp = xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
+    from sklearn.ensemble import RandomForestRegressor
+    progress(40, "Training Impact Score model (RandomForest)...")
+    xgb_imp = RandomForestRegressor(n_estimators=100, random_state=42)
     xgb_imp.fit(X_train, yi_train)
     imp_rmse = float(np.sqrt(mean_squared_error(yi_test, xgb_imp.predict(X_test))))
 

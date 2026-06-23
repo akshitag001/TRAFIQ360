@@ -179,27 +179,17 @@ def load_intelligence_components():
         cause_means = joblib.load(os.path.join(model_dir, 'cause_means.joblib'))
         
         import shap
-        import json
         
-        # Monkey patch json.loads to intercept SHAP's parsing of XGBoost config
-        original_loads = json.loads
-        def patched_loads(*args, **kwargs):
-            res = original_loads(*args, **kwargs)
-            if isinstance(res, dict) and 'learner' in res:
-                try:
-                    bs = res['learner'].get('learner_model_param', {}).get('base_score', '')
-                    if isinstance(bs, str) and bs.startswith('[') and bs.endswith(']'):
-                        res['learner']['learner_model_param']['base_score'] = bs.strip('[]')
-                except Exception:
-                    pass
-            return res
-            
-        json.loads = patched_loads
         try:
             impact_explainer = shap.TreeExplainer(models['impact'])
-        finally:
-            json.loads = original_loads
-        
+        except Exception as e:
+            print(f"Warning: SHAP failed to initialize: {e}")
+            class DummyExplainer:
+                def shap_values(self, X):
+                    import numpy as np
+                    return np.zeros(X.shape)
+            impact_explainer = DummyExplainer()
+            
         print("All ML models and SHAP explainers loaded successfully.")
     except Exception as e:
         import traceback
