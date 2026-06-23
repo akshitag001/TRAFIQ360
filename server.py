@@ -179,6 +179,19 @@ def load_intelligence_components():
         cause_means = joblib.load(os.path.join(model_dir, 'cause_means.joblib'))
         
         import shap
+        import json
+        
+        # Patch for old SHAP versions crashing on XGBoost >= 2.0 array formatted base_score
+        booster = models['impact'].get_booster()
+        config = json.loads(booster.save_config())
+        try:
+            bs = config.get("learner", {}).get("learner_model_param", {}).get("base_score", "")
+            if isinstance(bs, str) and bs.startswith("[") and bs.endswith("]"):
+                config["learner"]["learner_model_param"]["base_score"] = bs.strip("[]")
+                booster.load_config(json.dumps(config))
+        except Exception:
+            pass
+
         impact_explainer = shap.TreeExplainer(models['impact'])
         
         print("All ML models and SHAP explainers loaded successfully.")
