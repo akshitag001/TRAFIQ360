@@ -26,4 +26,4 @@ COPY --chown=user . $HOME/app/
 EXPOSE 7860
 
 # Run the Flask server
-CMD ["python", "server.py"]
+CMD ["python", "app.py"]
