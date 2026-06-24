@@ -1072,7 +1072,20 @@
                     <span style="display:flex; align-items:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="14" width="24" height="16" rx="1" fill="#1e3a5f"/><polygon points="2,14 16,4 30,14" fill="#0f172a"/><rect x="15" y="0" width="2" height="6" fill="#94a3b8"/><circle cx="16" cy="0" r="1.5" fill="#22c55e"/><rect x="7" y="17" width="4" height="4" rx="0.5" fill="#60a5fa" opacity="0.8"/><rect x="14" y="17" width="4" height="4" rx="0.5" fill="#60a5fa" opacity="0.8"/><rect x="21" y="17" width="4" height="4" rx="0.5" fill="#fbbf24" opacity="0.9"/><rect x="13" y="23" width="6" height="7" rx="1" fill="#0f172a"/></svg> Police Stations (TPS)</span>
                 </div>
             </div>
-            <div id="dashboard-map" style="height: 400px; border-radius: 6px; border: 1px solid var(--border); overflow:hidden; z-index: 1;"></div>
+            <div style="position: relative; height: 400px; border-radius: 6px; border: 1px solid var(--border); overflow:hidden; z-index: 1;">
+                <div id="dashboard-map" style="height: 100%; width: 100%;"></div>
+                
+                <!-- Recenter Button -->
+                <button id="dashboard-map-recenter-btn" title="Recenter Map" style="position: absolute; top: 12px; right: 12px; z-index: 1000; width: 36px; height: 36px; border-radius: 50%; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 0 0-10 10"></path><path d="M12 22a10 10 0 0 0 10-10"></path><path d="M2 12h20"></path><path d="M12 2v20"></path></svg>
+                </button>
+                
+                <!-- Coordinate Overlay -->
+                <div id="dashboard-map-coords-overlay" style="position: absolute; bottom: 12px; left: 12px; z-index: 1000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); padding: 6px 12px; border-radius: 30px; color: #cbd5e1; font-size: 10px; font-family: var(--font-mono); border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 6px; letter-spacing: 0.5px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #38bdf8;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                    <span id="dashboard-map-coords-text">12.97160, 77.59460</span>
+                </div>
+            </div>
         </div>
 
         <div class="card" style="margin-bottom: 24px;">
@@ -1292,7 +1305,20 @@
 
     <!-- ── Combined Operations View (Pages 3, 4, 5) ── -->
     <div class="map-wrapper page-view" id="pg-operations" style="height: calc(100vh - 110px); width: 100%; display: none;">
-        <div id="map" style="flex: 1; height: 100%;"></div>
+        <div style="flex: 1; height: 100%; position: relative;">
+            <div id="map" style="width: 100%; height: 100%;"></div>
+            
+            <!-- Recenter Button -->
+            <button id="map-recenter-btn" title="Recenter Map" style="position: absolute; top: 20px; right: 20px; z-index: 1000; width: 44px; height: 44px; border-radius: 50%; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 0 0-10 10"></path><path d="M12 22a10 10 0 0 0 10-10"></path><path d="M2 12h20"></path><path d="M12 2v20"></path></svg>
+            </button>
+            
+            <!-- Coordinate Overlay -->
+            <div id="map-coords-overlay" style="position: absolute; bottom: 20px; left: 20px; z-index: 1000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(10px); padding: 8px 16px; border-radius: 30px; color: #cbd5e1; font-size: 11px; font-family: var(--font-mono); border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 8px; letter-spacing: 0.5px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #38bdf8;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <span id="map-coords-text">12.97160, 77.59460</span>
+            </div>
+        </div>
         <aside class="map-sidebar" style="width: 450px; background-color: var(--surface); border-left: 1px solid var(--border); height: 100%; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px;">
             
             <!-- Sub-Panel 3: GIS Controller -->
@@ -2278,6 +2304,22 @@
                 attribution: '&copy; CartoDB &copy; OpenStreetMap contributors'
             }).addTo(map);
 
+            // Add Mousemove listener for coordinates
+            map.on('mousemove', function(e) {
+                const coordsEl = document.getElementById('map-coords-text');
+                if(coordsEl) {
+                    coordsEl.innerText = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+                }
+            });
+
+            // Add Click listener for recenter button
+            const recenterBtn = document.getElementById('map-recenter-btn');
+            if(recenterBtn) {
+                recenterBtn.addEventListener('click', function() {
+                    map.setView([12.9716, 77.5946], 12);
+                });
+            }
+
             // 1. Fetch and render Road Network GeoJSON
             fetch('/api/road-network')
                 .then(res => res.json())
@@ -2325,6 +2367,22 @@
             L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
                 attribution: '&copy; CartoDB &copy; OpenStreetMap contributors'
             }).addTo(dashboardMap);
+
+            // Add Mousemove listener for coordinates
+            dashboardMap.on('mousemove', function(e) {
+                const coordsEl = document.getElementById('dashboard-map-coords-text');
+                if(coordsEl) {
+                    coordsEl.innerText = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+                }
+            });
+
+            // Add Click listener for recenter button
+            const recenterBtn = document.getElementById('dashboard-map-recenter-btn');
+            if(recenterBtn) {
+                recenterBtn.addEventListener('click', function() {
+                    dashboardMap.setView([12.9716, 77.5946], 12);
+                });
+            }
 
             // Fetch and render Road Network GeoJSON
             fetch('/api/road-network')

@@ -19,7 +19,7 @@ Dataset (8,173 rows)
      ▼
 Feature Engineering  ──►  [XGBoost Impact] [XGBoost Duration] [LightGBM Closure]
      │                              │
-     │                       Flask REST API (server.py)
+     │                       Flask REST API (app.py)
      │                              │
      ├─── OSM Graph (NetworkX) ────►├─── /api/simulate-diversion
      ├─── ILP Optimizer (PuLP) ────►├─── /api/optimize
@@ -34,7 +34,7 @@ Feature Engineering  ──►  [XGBoost Impact] [XGBoost Duration] [LightGBM Cl
 
 | Component | Role |
 |---|---|
-| `server.py` | Flask API — 30+ endpoints; model inference, ILP, graph routing, PDF generation |
+| `app.py` & `routes/` | Modular Flask API - 30+ endpoints; model inference, ILP, graph routing, PDF generation |
 | `index.html` | Single-page React-less UI with Leaflet maps, Chart.js graphs, 7 functional tabs |
 | `scratch/gis_twin.py` | OSM NetworkX digital twin — junction mapping, k-shortest path routing |
 | `scratch/optimizer.py` | PuLP ILP resource allocator — officers + barricades with soft constraints |
@@ -60,11 +60,24 @@ Feature Engineering  ──►  [XGBoost Impact] [XGBoost Duration] [LightGBM Cl
 
 ## Installation
 
+### Prerequisites
+- Python 3.9+
+- [Git LFS](https://git-lfs.github.com/) (Only required if cloning via Git)
+
+### Option A: If you received this project as a ZIP file
+1. **Unzip** the folder and open a terminal/command prompt inside the `TRAFIQ360` directory.
+2. `pip install -r requirements.txt` (Installs all required Python packages)
+3. `python app.py` (Starts the Flask backend)
+4. Open `http://127.0.0.1:7860` in your web browser.
+
+### Option B: If cloning from GitHub
 1. `git clone https://github.com/akshitag001/TRAFIQ360.git`
 2. `cd TRAFIQ360`
-3. `pip install -r requirements.txt`
-4. `python server.py`
-5. Open `http://127.0.0.1:5000`
+3. `git lfs install`
+4. `git lfs pull` (Crucial: Downloads the actual ML model files inside the `models/` folder)
+5. `pip install -r requirements.txt`
+6. `python app.py`
+7. Open `http://127.0.0.1:7860` in your web browser.
 
 > **Note:** The OSM graph file (`data/bengaluru_graph.graphml`, ~24 MB) is included in the repo. First startup takes ~15–20 seconds to load the graph and ML models.
 
@@ -137,7 +150,10 @@ Feature Engineering  ──►  [XGBoost Impact] [XGBoost Duration] [LightGBM Cl
 
 ```
 TRAFIQ360/
-├── server.py                    # Flask API — 30+ endpoints, ML inference, PDF gen
+├── app.py                       # New modular Flask API entry point
+│ server.py                    # Legacy Monolithic API (retained for rollback)
+│ routes/                      # API endpoint blueprints
+│ core/                        # Central configuration and model loading
 ├── index.html                   # Single-page frontend — 7 tabs, Leaflet, Chart.js
 ├── requirements.txt             # Pinned Python dependencies
 ├── models/

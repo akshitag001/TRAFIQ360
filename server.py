@@ -1,3 +1,12 @@
+# ==============================================================================
+# 🚨🚨🚨 LEGACY FILE 🚨🚨🚨
+# This monolithic server.py file has been refactored into a modular architecture.
+# The new entry point is app.py. All routes have been moved to the `routes/` 
+# directory, and core logic has been moved to `core/`.
+# This file is retained for reference and rollback purposes ONLY.
+# Do NOT make updates to this file!
+# ==============================================================================
+
 import platform
 from collections import namedtuple
 _UnameResult = namedtuple('uname_result', ['system', 'node', 'release', 'version', 'machine'])

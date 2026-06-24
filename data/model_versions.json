@@ -20,5 +20,27 @@
     "rmse_duration": 123592.591,
     "notes": "challenger (insufficient gain)",
     "is_active": false
+  },
+  {
+    "version": "v1.1",
+    "trained_at": "2026-06-22T11:19:11.634266",
+    "n_samples": 8174,
+    "xgb_auc": 0.8798,
+    "lgb_auc": 0.7371,
+    "rmse_impact": 1.2017,
+    "rmse_duration": 123592.591,
+    "notes": "challenger (insufficient gain)",
+    "is_active": false
+  },
+  {
+    "version": "v1.1",
+    "trained_at": "2026-06-23T15:10:38.152675",
+    "n_samples": 8174,
+    "xgb_auc": 0.8811,
+    "lgb_auc": 0.7371,
+    "rmse_impact": 1.189,
+    "rmse_duration": 123592.591,
+    "notes": "challenger (insufficient gain)",
+    "is_active": false
   }
 ]
